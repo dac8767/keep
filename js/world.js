@@ -33,6 +33,7 @@
       this.astarStamp = new Uint32Array(N * N);
       this.astarClosed = new Uint32Array(N * N);
       this.stampN = 1;
+      this.shoreRisk = new Uint8Array(N * N); // shoreline a tentacle monster can reach: friendly paths avoid it
     }
 
     t(x, y) { return this.terrain[K.idx(x, y)]; }
@@ -471,7 +472,7 @@
           const j = ny * N + nx;
           if (closed[j] === sN || !this.fPass(j)) continue;
           if (dx && dy && !this.diagOk(i, j, y * N + nx, ny * N + x, (k) => !this.fPass(k))) continue;
-          const ng = g[i] + this.fCost(j) * len;
+          const ng = g[i] + this.fCost(j) * len + (this.shoreRisk[j] ? 14 : 0);
           if (stamp[j] !== sN || ng < g[j]) {
             stamp[j] = sN; g[j] = ng; from[j] = i;
             heap.push(ng + Math.hypot(nx - hx, ny - hy), j);

@@ -304,40 +304,79 @@
     }
   }
 
-  // ---------------- tentacle monster ----------------
+  // ---------------- water beasts: tentacle monsters (lakes) and crocodiles (rivers) ----------------
+  // Both attack anyone, friend or foe, in the water; tentacles also reach the shoreline.
+  // Nobody on a bridge (or any other structure) can be attacked.
+  K.WATER_BEASTS = {
+    tentacle: { name: 'Tentacle Monster', dmg: 35, cd: 1.3, water: 3.2, shore: 1.6, speed: 1.5 },
+    croc: { name: 'Crocodile', dmg: 30, cd: 1.5, water: 2.2, shore: 0, speed: 1.1 },
+  };
+  // tentacles roam any water; crocodiles keep to rivers and the moats joined to them
+  const swims = (m, t) => (m.kind === 'croc' ? t === T.RIVER || t === T.MOAT : K.isWater(t));
+  // Mark land within a step of water near each tentacle so friendly units path around it.
+  function markShoreRisk(G) {
+    const w = G.world, r = w.shoreRisk;
+    if (w.riskTiles) for (const i of w.riskTiles) r[i] = 0;
+    w.riskTiles = [];
+    for (const m of G.monsters) {
+      if (m.kind === 'croc') continue;
+      const mx = Math.floor(m.x), my = Math.floor(m.y);
+      for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) {
+        const x = mx + dx, y = my + dy;
+        if (!K.inb(x, y) || dx * dx + dy * dy > 49) continue;
+        const i = K.idx(x, y);
+        if (r[i] || K.isWater(w.terrain[i]) || w.sgrid[i]) continue;
+        let shore = false;
+        for (const [ex, ey] of K.DIRS8) if (K.inb(x + ex, y + ey) && K.isWater(w.terrain[K.idx(x + ex, y + ey)])) { shore = true; break; }
+        if (shore) { r[i] = 1; w.riskTiles.push(i); }
+      }
+    }
+  }
   K.updateMonsters = function (G, dt) {
     const w = G.world;
+    G.riskT = (G.riskT || 0) - dt;
+    if (G.riskT <= 0) { G.riskT = 0.5; markShoreRisk(G); }
     for (const m of G.monsters) {
+      const md = K.WATER_BEASTS[m.kind || 'tentacle'];
       m.cd -= dt; m.attacking -= dt;
       const mi = K.idx(Math.floor(m.x), Math.floor(m.y));
-      if (!K.isWater(w.terrain[mi])) {
+      if (!swims(m, w.terrain[mi])) {
         // the water it was in vanished (bridge etc. doesn't count) — snap to nearest water
         let best = null, bd = 1e9;
         for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
           const x = Math.floor(m.x) + dx, y = Math.floor(m.y) + dy;
-          if (K.inb(x, y) && K.isWater(w.terrain[K.idx(x, y)]) && dx * dx + dy * dy < bd) { bd = dx * dx + dy * dy; best = [x, y]; }
+          if (K.inb(x, y) && swims(m, w.terrain[K.idx(x, y)]) && dx * dx + dy * dy < bd) { bd = dx * dx + dy * dy; best = [x, y]; }
         }
         if (best) { m.x = best[0] + 0.5; m.y = best[1] + 0.5; }
         m.path = null;
       }
       // attack
       if (m.cd <= 0) {
-        // prey: boats and anything in the water; units at the water's edge only when very close.
-        // Bridges, drawbridges and walls are safe.
-        const ok = (v) => !v.retreat && !w.sgrid[K.tileOf(v)] && clearLine(w, m.x, m.y, v.x, v.y);
+        // prey: boats and anything in the water, either side; tentacles also snatch units at the
+        // water's edge. Bridges, drawbridges and walls are safe.
+        const ok = (v) => !v.retreat && !v.onWall && !w.sgrid[K.tileOf(v)] && clearLine(w, m.x, m.y, v.x, v.y);
         const inWater = (v) => K.isWater(w.terrain[K.tileOf(v)]);
-        const t = K.nearest(G, m.x, m.y, 3.2, 1, (v) => ok(v) && inWater(v)) || K.nearest(G, m.x, m.y, 1.6, 1, (v) => ok(v) && !inWater(v));
+        const pick = (r, f) => {
+          const a = K.nearest(G, m.x, m.y, r, 0, f), e = K.nearest(G, m.x, m.y, r, 1, f);
+          return a && e ? (Math.hypot(a.x - m.x, a.y - m.y) < Math.hypot(e.x - m.x, e.y - m.y) ? a : e) : a || e;
+        };
+        const t = pick(md.water, (v) => ok(v) && inWater(v)) || (md.shore ? pick(md.shore, (v) => ok(v) && !inWater(v)) : null);
         if (t) {
-          m.cd = 1.3; m.attacking = 0.45; m.submerged = 0;
+          m.cd = md.cd; m.attacking = 0.45; m.submerged = 0;
           m.atkAng = Math.atan2(t.y - m.y, t.x - m.x);
-          K.damage(G, t, 35);
+          if (m.kind === 'croc') m.ang = m.atkAng;
+          K.damage(G, t, md.dmg);
+          if (t.team === 0 && !(m.warned > G.time)) {
+            m.warned = G.time + 30;
+            G.msg(`A ${md.name.toLowerCase()} is attacking your ${t.kind === 'king' ? K.rulerName(G) : 'people'} at the water!`, 'bad');
+          }
           G.particles.push({ kind: 'splash', x: m.x, y: m.y, life: 0.6, max: 0.6 });
           continue;
         }
         // tear at enemy covered bridges within reach
         let eb = -1;
         for (const i of w.ebridgeHp.keys()) if (Math.hypot((i & NM) + 0.5 - m.x, (i >> NS) + 0.5 - m.y) < 2.2) { eb = i; break; }
-        if (eb >= 0) {
+        if (eb >= 0 && m.kind !== 'croc') {
           m.cd = 1.6; m.attacking = 0.45; m.submerged = 0;
           m.atkAng = Math.atan2((eb >> NS) + 0.5 - m.y, (eb & NM) + 0.5 - m.x);
           K.damageEBridge(G, eb, 30);
@@ -356,9 +395,10 @@
         if (!m.path) { m.wait = 2; continue; }
       }
       const n = m.path[m.pi];
-      if (!K.isWater(w.terrain[n])) { m.path = null; continue; }
+      if (!swims(m, w.terrain[n])) { m.path = null; continue; }
       const tx = (n & NM) + 0.5, ty = (n >> NS) + 0.5;
-      const dx = tx - m.x, dy = ty - m.y, d = Math.hypot(dx, dy), sp = 1.5 * dt;
+      const dx = tx - m.x, dy = ty - m.y, d = Math.hypot(dx, dy), sp = md.speed * dt;
+      if (d > 0.01) { const a = Math.atan2(dy, dx), da = Math.atan2(Math.sin(a - (m.ang || 0)), Math.cos(a - (m.ang || 0))); m.ang = (m.ang || 0) + da * Math.min(1, dt * 5); }
       if (d <= sp) { m.x = tx; m.y = ty; m.pi++; if (m.pi >= m.path.length) m.wait = 1 + Math.random() * 4; }
       else { m.x += (dx / d) * sp; m.y += (dy / d) * sp; }
     }
@@ -381,7 +421,7 @@
         const nx = x + dx, ny = y + dy;
         if (!K.inb(nx, ny)) continue;
         const j = K.idx(nx, ny);
-        if (prev.has(j) || !K.isWater(w.terrain[j])) continue;
+        if (prev.has(j) || !swims(m, w.terrain[j])) continue;
         prev.set(j, i); q.push(j);
       }
     }
@@ -459,6 +499,8 @@
         if (!wet) for (let k = 0; k < 3; k++) G.particles.push({ kind: 'dust', x: p.tx + (Math.random() - 0.5), y: p.ty + (Math.random() - 0.5), vx: (Math.random() - 0.5), vy: -0.5, life: 0.9, max: 0.9 });
       } else if (p.struct) {
         if (w.structs.has(p.struct.id)) K.damageStruct(G, p.struct, p.dmg);
+      } else if (p.beast) {
+        if (!p.beast.dead) { p.beast.hp -= p.dmg; p.beast.hurtT = 4; }
       } else if (p.target && !p.target.dead) {
         const t = p.target;
         if (Math.hypot(t.x - p.tx, t.y - 0.4 - p.ty) < 1.2) {

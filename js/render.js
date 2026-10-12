@@ -218,7 +218,7 @@
       items.push({ y: u.y + (u.onWall ? 0.6 : 0.01), u });
     }
     for (const m of G.monsters) if (m.x > x0 - 3 && m.x < x1 + 3 && m.y > y0 - 3 && m.y < y1 + 3) items.push({ y: m.y + 0.5, m });
-    for (const b of G.beasts || []) if (!b.dead && b.x > x0 - 3 && b.x < x1 + 3 && b.y > y0 - 3 && b.y < y1 + 3) items.push({ y: b.y + 0.2, b });
+    for (const b of G.beasts || []) if (!b.dead && b.x > x0 - 3 && b.x < x1 + 3 && b.y > y0 - 3 && b.y < y1 + 3) items.push({ y: b.y + (b.kind === 'wyvern' ? 3 : 0.2), b });
     items.sort((a, b) => a.y - b.y);
     for (const it of items) {
       if (it.s) drawStruct(ctx, it.s, G, time);
@@ -486,9 +486,52 @@
 
   function drawBeast(ctx, b, time) {
     const px = Math.round(b.x * TS), py = Math.round(b.y * TS), t = time * (b.moving ? 10 : 2) + b.phase;
+    const sc = b.young ? 0.6 : 1, top = py - ({ troll: 25, wolf: 14, wyvern: 30 }[b.kind] || 13) * sc;
+    ctx.save();
+    if (b.young) { ctx.translate(px, py); ctx.scale(sc, sc); ctx.translate(-px, -py); }
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath(); ctx.ellipse(px, py + 1, b.kind === 'troll' ? 8 : 10, 3, 0, 0, Math.PI * 2); ctx.fill();
-    if (b.kind === 'troll') {
+    ctx.beginPath(); ctx.ellipse(px, py + 1, b.kind === 'troll' ? 8 : b.kind === 'wolf' ? 7 : 10, b.kind === 'wyvern' ? 2.5 : 3, 0, 0, Math.PI * 2); ctx.fill();
+    const f = b.face < 0 ? -1 : 1, P = (c, x, y, w, h) => { ctx.fillStyle = c; ctx.fillRect(f > 0 ? px + x : px - x - w, py + y, w, h); };
+    if (b.kind === 'wolf') {
+      // dire wolf, side view: shaggy grey coat, bushy tail, yellow eyes; lunges when biting
+      const run = b.moving ? Math.sin(t) : 0, lun = b.atk > 0 ? 2 : 0, bob = Math.round(Math.abs(run));
+      P('#2c2c34', -10, -11 - bob, 4, 2); P('#6c6c78', -9, -11 - bob, 3, 1); P('#2c2c34', -8, -10 - bob, 3, 2);
+      for (const [lx, ph] of [[-5, 0], [-3, Math.PI], [2, Math.PI], [4, 0]]) {
+        const o = Math.round(Math.sin(t + ph) * 1.5 * (b.moving ? 1 : 0));
+        P('#3a3a44', lx + o, -5, 2, 5); P('#585864', lx + o, -5, 1, 4); P('#1c1c22', lx + o, -1, 2, 1);
+      }
+      P('#2c2c34', -7, -11 - bob, 13, 7); P('#6c6c78', -6, -10 - bob, 11, 5); P('#8a8a96', -5, -11 - bob, 8, 2);
+      P('#b8b8c0', -4, -6 - bob, 7, 1); P('#4c4c58', -6, -12 - bob, 2, 1); P('#4c4c58', -2, -12 - bob, 2, 1); P('#4c4c58', 2, -12 - bob, 2, 1);
+      const hx = 5 + lun;
+      P('#2c2c34', hx, -13 - bob, 5, 6); P('#7a7a86', hx + 1, -12 - bob, 3, 4);
+      P('#2c2c34', hx + 1, -15 - bob, 1, 2); P('#2c2c34', hx + 3, -15 - bob, 1, 2);
+      P('#2c2c34', hx + 4, -10 - bob, 4, 2); P('#9a9aa6', hx + 4, -10 - bob, 3, 1); P('#111', hx + 7, -10 - bob, 1, 1);
+      if (lun) { P('#a83838', hx + 4, -8 - bob, 3, 1); P('#f0ead8', hx + 5, -8 - bob, 1, 1); }
+      P('#ffd84a', hx + 2, -12 - bob, 1, 1);
+    } else if (b.kind === 'wyvern') {
+      // wyvern in flight: shadow on the ground, beating wings, swoops low to strike
+      const lift = (b.atk > 0 ? 6 : 15) + Math.sin(t * 0.6) * 1.5, cy = Math.round(py - lift), fl = Math.sin(time * (b.moving ? 9 : 6) + b.phase);
+      const a = 0.5 + 0.5 * fl, sy = cy - 3;
+      const wing = (dir, len, dark) => {
+        // membrane fan from the shoulder: leading arm to the tip, scalloped trailing edge back to the hip
+        const tipX = -2 - 3 * a, tipY = sy + dir * len * (0.35 + 0.65 * a), X = x => Math.round(f > 0 ? px + x : px - x);
+        ctx.fillStyle = dark ? '#4a2018' : '#9a3a2a'; ctx.strokeStyle = '#2a120e'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(X(2), sy); ctx.lineTo(X(tipX), tipY);
+        ctx.lineTo(X(-7), sy + dir * len * 0.45 * (0.5 + a)); ctx.lineTo(X(-9), sy + dir * len * 0.2 * (0.5 + a)); ctx.lineTo(X(-6), sy);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.strokeStyle = dark ? '#6a2a20' : '#c25a3a'; ctx.beginPath();
+        ctx.moveTo(X(1), sy); ctx.lineTo(X(-7), sy + dir * len * 0.45 * (0.5 + a));
+        ctx.moveTo(X(1), sy); ctx.lineTo(X(-9), sy + dir * len * 0.2 * (0.5 + a)); ctx.stroke();
+        ctx.fillStyle = '#e8d8b0'; ctx.fillRect(X(tipX) - 1, Math.round(tipY) - 1, 2, 2);
+      };
+      wing(-1, 15, true);
+      P('#3a1a14', -9, cy - py - 1, 6, 2); P('#6a2a20', -12, cy - py, 4, 1); P('#3a1a14', -14, cy - py - 1, 2, 3);
+      P('#3a1a14', -4, cy - py - 4, 9, 7); P('#7a3020', -3, cy - py - 3, 7, 5); P('#d8a060', -2, cy - py, 5, 2);
+      P('#3a1a14', 4, cy - py - 6, 5, 4); P('#7a3020', 5, cy - py - 5, 3, 2); P('#3a1a14', 8, cy - py - 4, 3, 2);
+      P('#e8d8b0', 5, cy - py - 7, 1, 2); P('#ffd84a', 6, cy - py - 5, 1, 1);
+      if (b.atk > 0) { P('#3a1a14', -1, cy - py + 3, 1, 3); P('#3a1a14', 2, cy - py + 3, 1, 3); }
+      wing(1, 9, false);
+    } else if (b.kind === 'troll') {
       const img = K.SPR.troll[b.atk > 0 ? 2 : b.moving && Math.sin(t) > 0 ? 1 : 0];
       ctx.save(); ctx.translate(px, 0); if (b.face < 0) ctx.scale(-1, 1);
       ctx.drawImage(img, -11, py + 2 - img.height);
@@ -521,10 +564,73 @@
       ctx.fillRect(ex, py - 7, 1, 1); ctx.fillRect(ex + 2, py - 7, 1, 1); ctx.fillRect(ex + 1, py - 6, 1, 1);
       ctx.fillStyle = '#d8d0c0'; ctx.fillRect(Math.round(hx) + (b.face < 0 ? -3 : 2), py - 4 + (b.atk > 0 ? 1 : 0), 1, 2);
     }
-    if (b.hp < b.maxHp) bar(ctx, px - 7, py - (b.kind === 'troll' ? 27 : 15), 14, b.hp / b.maxHp, '#c060e0');
+    ctx.restore();
+    if (b.hp < b.maxHp) bar(ctx, px - 7, top - 2, 14, b.hp / b.maxHp, '#c060e0');
+    // sex marker: blue ♂ / pink ♀, with a heart while courting
+    if (b.sex) {
+      ctx.save(); ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      const sx = px + (b.kind === 'troll' ? 9 : 8) * sc, sy = top + 4;
+      ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.strokeText(b.sex === 'm' ? '♂' : '♀', sx, sy);
+      ctx.fillStyle = b.sex === 'm' ? '#6fb4ff' : '#ff86c8'; ctx.fillText(b.sex === 'm' ? '♂' : '♀', sx, sy);
+      if (b.mate && !b.mate.dead) {
+        const hy = sy - 8 - Math.abs(Math.sin(time * 3 + b.phase)) * 2;
+        ctx.strokeText('♥', sx, hy); ctx.fillStyle = '#ff5a7a'; ctx.fillText('♥', sx, hy);
+      }
+      ctx.restore();
+    }
+  }
+
+  // Crocodile, drawn top-down along its heading: tapering tail, splayed legs, ridged back, long snout.
+  function drawCroc(ctx, m, time) {
+    const px = m.x * TS, py = m.y * TS, t = time + m.phase, moving = m.path && m.pi < m.path.length && !(m.wait > 0);
+    // wake ripples
+    ctx.strokeStyle = 'rgba(200,230,255,0.4)'; ctx.lineWidth = 1;
+    const rr = 5 + ((t * 4) % 8);
+    ctx.globalAlpha = 1 - ((t * 4) % 8) / 8;
+    ctx.beginPath(); ctx.ellipse(px, py, rr * 1.4, rr * 0.7, m.ang || 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.save(); ctx.translate(Math.round(px), Math.round(py)); ctx.rotate(m.ang || 0);
+    const P = (c, x, y, w, h) => { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); };
+    if (m.submerged > 0 && !(m.attacking > 0)) {
+      // only eyes and nostrils break the surface
+      P('rgba(30,50,30,0.35)', -10, -3, 20, 6);
+      P('#3c5a2c', 4, -3, 3, 2); P('#3c5a2c', 4, 1, 3, 2); P('#ffd84a', 5, -3, 1, 1); P('#ffd84a', 5, 2, 1, 1);
+      P('#2c4220', 11, -1, 1, 1); P('#2c4220', 11, 1, 1, 1);
+      ctx.restore(); return;
+    }
+    const sw = moving ? Math.sin(t * 7) : Math.sin(t * 1.2) * 0.3;
+    // tail: segments swinging side to side
+    for (let k = 0; k < 7; k++) {
+      const x = -6 - k * 2, y = Math.round(sw * k * 0.45), h = Math.max(1, 5 - Math.floor(k * 0.7));
+      P('#2e4622', x - 1, y - Math.ceil(h / 2) - 0, 3, h + 1);
+      P('#4c6c34', x, y - Math.floor(h / 2), 2, h);
+      if (k % 2 === 0 && h > 2) P('#22361a', x, y, 1, 1);
+    }
+    // legs
+    const lg = moving ? Math.round(Math.sin(t * 7) * 1.5) : 0;
+    for (const [lx, s, o] of [[3, -1, lg], [3, 1, -lg], [-5, -1, -lg], [-5, 1, lg]]) {
+      P('#2e4622', lx + o - 1, s < 0 ? -7 : 4, 3, 3); P('#4c6c34', lx + o - 1, s < 0 ? -6 : 4, 2, 2);
+      P('#1c2a14', lx + o - 2, s < 0 ? -8 : 6, 1, 1); P('#1c2a14', lx + o + 1, s < 0 ? -8 : 6, 1, 1);
+    }
+    // body
+    P('#2e4622', -7, -4, 15, 8);
+    P('#4c6c34', -6, -3, 13, 6);
+    P('#5e8040', -5, -2, 11, 4);
+    for (let k = -5; k <= 5; k += 2) { P('#2e4622', k, -1, 1, 1); P('#2e4622', k, 0, 1, 1); P('#7a9a52', k + 1, -2, 1, 1); P('#7a9a52', k + 1, 1, 1, 1); }
+    // head and snout (jaws gape while biting)
+    const gape = m.attacking > 0 ? 2 : 0;
+    P('#2e4622', 7, -3, 4, 6); P('#4c6c34', 7, -2, 4, 4);
+    P('#2e4622', 11, -2 - gape, 6, 2); P('#4c6c34', 11, -2 - gape, 5, 1);
+    P('#2e4622', 11, gape, 6, 2); P('#4c6c34', 11, gape + 1, 5, 1);
+    if (gape) { P('#a83838', 11, -1, 5, 2); P('#f0ead8', 12, -1, 1, 1); P('#f0ead8', 14, -1, 1, 1); P('#f0ead8', 13, 0, 1, 1); P('#f0ead8', 15, 0, 1, 1); }
+    else P('#f0ead8', 12, 0, 1, 1), P('#f0ead8', 14, -1, 1, 1);
+    P('#ffd84a', 8, -3, 2, 1); P('#ffd84a', 8, 2, 2, 1); P('#111', 9, -3, 1, 1); P('#111', 9, 2, 1, 1);
+    P('#1c2a14', 16, -1 - gape, 1, 1); P('#1c2a14', 16, gape, 1, 1);
+    ctx.restore();
   }
 
   function drawMonster(ctx, m, time) {
+    if (m.kind === 'croc') return drawCroc(ctx, m, time);
     const px = m.x * TS, py = m.y * TS;
     const t = time + m.phase;
     // ripples
@@ -657,6 +763,17 @@
         ctx.strokeStyle = 'rgba(235,235,245,0.32)'; ctx.lineWidth = 0.6;
         for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4 + 0.2; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * 26, cy + Math.sin(a) * 18); ctx.stroke(); }
         for (const r of [8, 15, 22]) { ctx.beginPath(); for (let k = 0; k <= 8; k++) { const a = k * Math.PI / 4 + 0.2; const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r * 0.7; k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.stroke(); }
+      } else if (b.kind === 'wolf') {
+        // a trampled den with paw prints
+        ctx.fillStyle = 'rgba(70,52,36,0.35)'; ctx.beginPath(); ctx.ellipse(cx, cy, 14, 9, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = 'rgba(40,30,22,0.55)';
+        for (const [dx, dy] of [[-16, 8], [-11, 11], [14, -8], [18, -3], [6, 14]]) { ctx.fillRect(cx + dx, cy + dy, 2, 2); ctx.fillRect(cx + dx - 1, cy + dy - 2, 1, 1); ctx.fillRect(cx + dx + 1, cy + dy - 2, 1, 1); ctx.fillRect(cx + dx + 2, cy + dy - 1, 1, 1); }
+      } else if (b.kind === 'wyvern') {
+        // a nest of sticks and bones on the peak
+        ctx.fillStyle = '#5a4028'; ctx.beginPath(); ctx.ellipse(cx, cy, 11, 6, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#3a2818'; ctx.beginPath(); ctx.ellipse(cx, cy, 7, 3.5, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#e8e0cc'; ctx.fillRect(cx - 9, cy - 2, 5, 1); ctx.fillRect(cx + 5, cy + 2, 5, 1);
+        ctx.fillStyle = '#d8c8a0'; ctx.fillRect(cx - 2, cy - 2, 3, 3); ctx.fillRect(cx + 1, cy, 3, 3);
       } else {
         ctx.fillStyle = '#e8e0cc';
         for (const [dx, dy] of [[-10, 6], [9, -4], [4, 10], [-6, -9]]) { ctx.fillRect(cx + dx, cy + dy, 4, 1); ctx.fillRect(cx + dx - 1, cy + dy - 1, 1, 3); ctx.fillRect(cx + dx + 4, cy + dy - 1, 1, 3); }
@@ -739,10 +856,7 @@
     // and outline the realm that the hovered site would give you
     if (G.phase === 'place' && N > K.PLAY_N) {
       const b = (K.PLAY_N / 2 - 1) * TS, full = N * TS;
-      ctx.fillStyle = 'rgba(20,10,30,0.5)';
-      ctx.fillRect(0, 0, full, b); ctx.fillRect(0, full - b, full, b);
-      ctx.fillRect(0, b, b, full - 2 * b); ctx.fillRect(full - b, b, b, full - 2 * b);
-      ctx.strokeStyle = 'rgba(255,120,90,0.6)'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]);
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]);
       ctx.strokeRect(b, b, full - 2 * b, full - 2 * b);
       const gh = G.ui && G.ui.ghost && G.ui.ghost[0];
       if (gh && gh.type === 'keep' && K.realmFits(gh.x, gh.y)) {
@@ -939,11 +1053,12 @@
       mc.fillStyle = u.kind === 'king' ? '#f4cb4e' : u.team ? '#ff3a2a' : '#7fb0ff';
       mc.fillRect(Math.floor(u.x) - (u.kind === 'king' ? 1 : 0), Math.floor(u.y) - (u.kind === 'king' ? 1 : 0), u.kind === 'king' ? 3 : 2, u.kind === 'king' ? 3 : 2);
     }
-    for (const m of G.monsters) { mc.fillStyle = '#c070ff'; mc.fillRect(Math.floor(m.x) - 1, Math.floor(m.y) - 1, 3, 3); }
+    for (const m of G.monsters) { mc.fillStyle = m.kind === 'croc' ? '#b6d84a' : '#c070ff'; mc.fillRect(Math.floor(m.x) - 1, Math.floor(m.y) - 1, 3, 3); }
     for (const b of G.beasts || []) {
       if (b.dead) continue;
-      mc.fillStyle = '#000'; mc.fillRect(Math.floor(b.x) - 2, Math.floor(b.y) - 2, 5, 5);
-      mc.fillStyle = b.kind === 'spider' ? '#e04cff' : '#9adf5a'; mc.fillRect(Math.floor(b.x) - 1, Math.floor(b.y) - 1, 3, 3);
+      const r = b.young ? 1 : 2;
+      mc.fillStyle = '#000'; mc.fillRect(Math.floor(b.x) - r, Math.floor(b.y) - r, r * 2 + 1, r * 2 + 1);
+      mc.fillStyle = { spider: '#e04cff', troll: '#9adf5a', wolf: '#c8c8d4', wyvern: '#ff8a3a' }[b.kind]; mc.fillRect(Math.floor(b.x) - r + 1, Math.floor(b.y) - r + 1, r * 2 - 1, r * 2 - 1);
     }
     // mine sites (gold = open site, orange = built mine)
     for (const [mx, my] of w.mines || []) {
@@ -963,8 +1078,9 @@
     }
     if (G.phase === 'place' && N > K.PLAY_N) {
       const b = K.PLAY_N / 2 - 1;
-      mc.fillStyle = 'rgba(20,10,30,0.45)';
-      mc.fillRect(0, 0, N, b); mc.fillRect(0, N - b, N, b); mc.fillRect(0, b, b, N - 2 * b); mc.fillRect(N - b, b, b, N - 2 * b);
+      mc.strokeStyle = 'rgba(255,255,255,0.9)'; mc.lineWidth = Math.max(1, N / 256); mc.setLineDash([N / 64, N / 96]);
+      mc.strokeRect(b, b, N - 2 * b, N - 2 * b);
+      mc.setLineDash([]);
       const gh = G.ui && G.ui.ghost && G.ui.ghost[0];
       if (gh && gh.type === 'keep' && K.realmFits(gh.x, gh.y)) {
         mc.strokeStyle = 'rgba(244,203,78,0.9)'; mc.lineWidth = 2;

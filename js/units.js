@@ -74,7 +74,7 @@
   // the wall that carries a mounted siege engine (s itself, or the anchor wall of a trebuchet)
   K.engineHost = (w, s) => (s && s.type === 'wall' ? (s.engine || (s.upg && s.upg.engine) ? s : s.engPart ? w.structs.get(s.engPart) || null : null) : null);
   K.damageStruct = function (G, s, dmg) {
-    if (!G.world.structs.has(s.id) || G.god || K.SDEF[s.type].eco || K.SDEF[s.type].noRaze) return;
+    if (!G.world.structs.has(s.id) || G.god || K.SDEF[s.type].noRaze) return;
     s.hp -= dmg;
     s.hitT = 0.15;
     if (s.hp <= 0) K.destroyStruct(G, s);
@@ -185,10 +185,10 @@
   // ---------- friendly AI ----------
   function hide(G, u, dt) {
     const w = G.world, k = w.keep;
-    if (u.onWall && u.job !== 'archer') { K.stepOffWall(G, u); u.wb = null; u.wpath = null; }
+    if (u.onWall && (u.job !== 'archer' || G.allKeep)) { K.stepOffWall(G, u); u.wb = null; u.wpath = null; }
     if (!k) return wander(G, u, dt, G.kingSpot.x, G.kingSpot.y, 3);
     const r = goTo(G, u, dt, adjTo(w, (j) => w.sgrid[j] === k.id), k.x + 1, k.y + 1, 'keep');
-    if (r) { deposit(G, u); u.hidden = true; u.path = null; u.moving = false; K.releaseJob(G, u); u.state = null; }
+    if (r) { deposit(G, u); u.hidden = true; if (G.phase === 'defense' || G.recall) u.shelt = true; u.path = null; u.moving = false; K.releaseJob(G, u); u.state = null; }
     else if (r === null) wander(G, u, dt, u.x, u.y, 1);
   }
   function wander(G, u, dt, cx, cy, rad) {
@@ -593,6 +593,7 @@
   // repairs come first and only sites inside the walls are worked on. Resource-building
   // sites are left to their own workers.
   const isBuildJob = (s) => (s.type === 'site' && !K.selfBuilt(s)) || !!s.upg;
+  const siegeBuild = (s) => isBuildJob(s) && !(s.type === 'site' && K.SDEF[s.final].eco);
   K.needsMason = (s) => !K.selfBuilt(s) && (isBuildJob(s) || s.hp < s.maxHp);
   // Work squares for builders: walkable tiles beside the structure, diagonals included. Each holds
   // one builder, so (with wallSpots) this is also how many builders can work on it at once.
@@ -611,14 +612,14 @@
   const isBattle = (w, i) => { const o = w.sgrid[i] && w.structs.get(w.sgrid[i]); return !!o && o.type === 'wall' && o.battlement; };
   // Walk along the wall-walk from battlement `start` to the nearest one a builder can climb onto from
   // the ground. Returns { climb: ground tile, route: wall tiles from the climbing point to start }.
-  function wallRoute(w, start) {
+  function wallRoute(w, start, job) {
     const prev = new Map([[start, -1]]), q = [start];
     for (let k = 0; k < q.length && k < 400; k++) {
       const i = q[k], x = i & NM, y = i >> NS;
       for (const [dx, dy] of K.DIRS4) {
         if (!K.inb(x + dx, y + dy)) continue;
         const g = K.idx(x + dx, y + dy);
-        if (!w.fPass(g)) continue;
+        if (!w.fPass(g) || (job && w.sgrid[g] === job.id)) continue;
         const route = [];
         for (let j = i; j !== -1; j = prev.get(j)) route.push(j);
         return { climb: g, route };
@@ -636,7 +637,7 @@
     const out = [];
     ring(s, (i) => {
       if (w.sgrid[i] === s.id || !isBattle(w, i) || K.engineHost(w, w.structs.get(w.sgrid[i]))) return;
-      const r = wallRoute(w, i);
+      const r = wallRoute(w, i, s);
       if (r) out.push({ i, climb: r.climb, route: r.route });
     });
     return out;
@@ -689,7 +690,7 @@
   const buildOrd = (s) => (s.type === 'site' ? s.ord : s.upg && s.upg.ord) || s.id;
   function doRepair(G, u, dt) {
     const w = G.world, def = G.phase === 'defense', o = def ? w.computeOutside() : null;
-    const valid = (s) => s && w.structs.has(s.id) && K.needsMason(s) && (!o || !o[K.idx(s.x, s.y)] || s.type === 'keep');
+    const valid = (s) => s && w.structs.has(s.id) && K.needsMason(s) && (!o || !o[K.idx(s.x, s.y)] || s.type === 'keep' || (!u.shelt && siegeBuild(s)));
     if (u.rep && (!valid(u.rep) || u.spot == null || (u.wb ? !isBattle(w, u.spot) : !w.fPass(u.spot)))) { u.rep = null; u.spot = null; u.path = null; }
     // up on the battlements: walk the wall-walk, and climb down again once the job is done
     if (u.onWall) {
@@ -1141,6 +1142,8 @@
       } else { u.moving = false; u.seated = !!G.throne; u.face = 1; }
       return;
     }
+    // "All to Keep": everyone, whatever their job, shelters until released
+    if (G.allKeep) { if (u.hidden) { u.moving = false; return; } u.order = null; return hide(G, u, dt); }
     if (u.hidden) {
       if (u.job === 'repair' && G.phase === 'defense') {
         if (Math.random() > dt * 0.5) return;
@@ -1148,7 +1151,7 @@
         let need = false;
         for (const s of w.structs.values()) if (K.needsMason(s) && !o[K.idx(s.x, s.y)]) { need = true; break; }
         if (!need) return;
-      } else if (danger) return;
+      } else if (danger && !K.isSoldier(u)) return;
       // come out of the keep
       const ks = G.kingSpot;
       u.hidden = false; u.x = ks.x + 0.5 + (Math.random() - 0.5); u.y = ks.y + 0.5; u.path = null; u.state = null;
@@ -1157,7 +1160,8 @@
     // non-combatants fight back if cornered
     const st = K.unitStats(u);
     if (!K.isSoldier(u)) {
-      if (danger && !(u.job === 'repair' && G.phase === 'defense')) return hide(G, u, dt);
+      // builders on castle works that may be raised during a siege carry on instead of sheltering
+      if (danger && !(u.job === 'repair' && (G.phase === 'defense' || (!u.shelt && u.rep && w.structs.has(u.rep.id) && siegeBuild(u.rep))))) return hide(G, u, dt);
       const t = K.nearest(G, u.x, u.y, st.range, 1, (v) => K.meleeOk(G, u, v));
       if (t && G.phase === 'defense') return melee(G, u, t, st);
       if (u.carry) return haul(G, u, dt);

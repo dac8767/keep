@@ -17,7 +17,7 @@
       <button id="btn-shape" class="hidden" title="Turn water or mountain tiles into land before founding your Keep (click again to undo)">Shape land</button>
       <button id="btn-begin" title="Skip the rest of the build phase">Begin assault</button>
       <button id="btn-bridges" class="hidden" title="Raise or lower every drawbridge">Raise bridges</button>
-      <button id="btn-interior" title="Highlight the enclosed castle interior (I)">Interior</button>
+      <button id="btn-allkeep" title="Call everyone — workers, builders and soldiers — into the Keep. Click again to send them back out.">All to Keep</button>
       <button id="btn-god" title="God mode: invincible and unlimited resources (testing)">God</button>
       <button data-speed="0" title="Pause (Space)">❚❚</button>
       <button data-speed="1" class="on" title="Normal speed (1)">▶</button>
@@ -70,7 +70,7 @@
       <p class="sub">Raise a castle. Protect your sovereign. Survive ten sieges.</p>
       <div class="how">
         <p><b>Found your realm</b> — survey the map and click to place your Keep.</p>
-        <p><b>Build phase (5:00)</b> — gather lumber, stone, ore and food; build farms, quarries, mines, a bloomery, houses and medical tents; wall in your King.</p>
+        <p><b>Build phase (10:00)</b> — gather lumber, stone, ore and food; build farms, quarries, mines, a bloomery, houses and medical tents; wall in your King.</p>
         <p><b>Defense phase</b> — armies march in formation from the red arrows at the map edge, with siege trains, rams and cavalry reserves. Subjects shelter in the Keep; you can still raise walls, gates and engines and train soldiers.</p>
         <p><b>Beasts</b> — giant spiders and cave trolls attack anyone near their lairs. Wall one in and it may guard your castle… if it doesn't eat your builders first.</p>
         <p><b>Moats</b> — dig trenches that touch a lake or river and they flood. Connect a lake with a tentacle monster and it may swim in to defend you.</p>
@@ -85,6 +85,10 @@
       <div id="custom" class="hidden">
         <div id="custom-sliders"></div>
         <button id="custom-reset">Reset to standard</button>
+        <div id="presets">
+          <div class="preset-save"><input id="preset-name" placeholder="Name these settings" maxlength="40"> <button id="preset-save">Save settings</button></div>
+          <div id="preset-list"></div>
+        </div>
       </div>
       <div id="saved-start"></div>
     </div>

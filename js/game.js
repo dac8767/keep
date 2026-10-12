@@ -42,7 +42,18 @@
       // start the monster on the deepest-looking tile (closest to the lake centre)
       let best = L.tiles[0], bd = 1e9;
       for (const i of L.tiles) { const d = K.dist(i & NM, i >> NS, L.cx, L.cy); if (d < bd) { bd = d; best = i; } }
-      G.monsters.push({ x: (best & NM) + 0.5, y: (best >> NS) + 0.5, path: null, pi: 0, wait: 0, cd: 0, attacking: 0, atkAng: 0, submerged: 0, phase: Math.random() * 10 });
+      G.monsters.push({ kind: 'tentacle', x: (best & NM) + 0.5, y: (best >> NS) + 0.5, path: null, pi: 0, wait: 0, cd: 0, attacking: 0, atkAng: 0, submerged: 0, phase: Math.random() * 10 });
+    }
+    // crocodiles bask along the rivers, well spread out and away from the suggested keep site
+    const bf = G.opts ? G.opts.beasts : 1, river = [];
+    for (let i = 0; i < N * N; i++) if (w.terrain[i] === K.T.RIVER) river.push(i);
+    const want = bf > 0 && river.length ? Math.max(1, Math.round(river.length / 260 * bf)) : 0, crocs = [];
+    for (let tries = 0; crocs.length < want && tries < want * 60; tries++) {
+      const i = river[Math.floor(Math.random() * river.length)], x = (i & NM) + 0.5, y = (i >> NS) + 0.5;
+      if (w.start && K.dist(x, y, w.start.x, w.start.y) < 14) continue;
+      if (crocs.some((c) => K.dist(x, y, c.x, c.y) < 18)) continue;
+      const c = { kind: 'croc', x, y, path: null, pi: 0, wait: Math.random() * 4, cd: 0, attacking: 0, atkAng: 0, ang: Math.random() * 6.3, submerged: 0, phase: Math.random() * 10 };
+      crocs.push(c); G.monsters.push(c);
     }
   }
 
@@ -65,6 +76,7 @@
     G.beasts = (G.beasts || []).filter((b) => b.hx - x0 > 3 && b.hy - y0 > 3 && b.hx - x0 < n - 3 && b.hy - y0 < n - 3 &&
       w.entries.every((e) => K.dist(b.hx - x0, b.hy - y0, e.x, e.y) >= 14));
     for (const b of G.beasts) { b.x -= x0; b.y -= y0; b.hx -= x0; b.hy -= y0; b.gx = b.gy = null; }
+    K.ensureWyvern(G, x - x0, y - y0);
     spawnMonsters(G);
     return { x: x - x0, y: y - y0 };
   }
@@ -163,19 +175,24 @@
     G.king = K.spawnUnit(G, 'king', G.throne.x + 0.5, G.throne.y + 0.65);
     G.king.sprite = G.ruler === 'queen' ? 'queen' : 'king';
     let n = 0;
-    for (let rad = 2.5; n < 14 && rad < 9; rad += 1)
-      for (let k = 0; k < 16 && n < 14; k++) {
+    const START = 20;
+    for (let rad = 2.5; n < START && rad < 9; rad += 1)
+      for (let k = 0; k < 16 && n < START; k++) {
         const a = (k / 16) * Math.PI * 2, px = x + 1.5 + Math.cos(a) * rad, py = y + 2 + Math.sin(a) * rad;
         const i = K.idx(Math.floor(px), Math.floor(py));
         if (!w.fPass(i) || w.sgrid[i]) continue;
         K.spawnUnit(G, 'subject', px, py); n++;
       }
-    while (n++ < 14) K.spawnUnit(G, 'subject', G.kingSpot.x + 0.5, G.kingSpot.y + 0.5);
+    while (n++ < START) K.spawnUnit(G, 'subject', G.kingSpot.x + 0.5, G.kingSpot.y + 0.5);
     // a few Builders to start, since every building needs builders
-    for (const u of G.units.filter((v) => v.kind === 'subject').slice(0, 3)) K.setJob(G, u, 'repair');
+    // plus a small garrison: 3 archers and 3 light infantry
+    const subs = G.units.filter((v) => v.kind === 'subject');
+    subs.slice(0, 3).forEach((u) => K.setJob(G, u, 'repair'));
+    subs.slice(3, 6).forEach((u) => K.setJob(G, u, 'archer'));
+    subs.slice(6, 9).forEach((u) => K.setJob(G, u, 'infantry'));
     G.phase = 'build';
     G.timer = K.BUILD_TIME;
-    G.msg('Build your castle! The first assault comes in 5 minutes.', 'good');
+    G.msg('Build your castle! The first assault comes in ' + Math.round(K.BUILD_TIME / 60) + ' minutes.', 'good');
     return true;
   };
 
@@ -1216,7 +1233,7 @@
     w.bump();
     // archers posted on battlements stay there through the build phase
     const keepsPost = (u) => !u.dead && u.job === 'archer' && u.post != null && w.structs.has(u.post);
-    for (const u of G.units) if (u.team === 0) { if (!keepsPost(u)) stepOffWall(G, u); u.wallPath = null; u.wb = null; u.wpath = null; u.state = null; u.path = null; }
+    for (const u of G.units) if (u.team === 0) { u.shelt = false; if (!keepsPost(u)) stepOffWall(G, u); u.wallPath = null; u.wb = null; u.wpath = null; u.state = null; u.path = null; }
     G.postTaken.clear();
     for (const u of G.units) { if (u.team === 0 && keepsPost(u)) G.postTaken.set(u.post, u.id); else { u.post = null; u.manualPost = false; } }
     chooseEntries(G);

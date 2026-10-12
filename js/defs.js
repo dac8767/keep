@@ -1,22 +1,22 @@
 'use strict';
 // Game data: structures, jobs, unit stats and wave composition.
 (function () {
-  K.BUILD_TIME = 300;
+  K.BUILD_TIME = 600;
   K.RECALL_TIME = 20;
   K.ROUNDS = 10;
   K.DEFENSE_TIME = [360, 360, 420, 420, 480, 480, 540, 540, 600, 600];
 
   K.SDEF = {
-    keep: { name: 'Keep', w: 3, h: 3, hp: 3000, cost: {}, stone: true, housing: 16, store: { food: 400, lumber: 400, plank: 100, stone: 400, ore: 150, iron: 150 }, desc: 'Home of your King. Shelters subjects during sieges.' },
+    keep: { name: 'Keep', w: 3, h: 3, hp: 3000, cost: {}, stone: true, housing: 22, store: { food: 800, lumber: 800, plank: 200, stone: 800, ore: 300, iron: 300 }, desc: 'Home of your King. Shelters subjects during sieges.' },
     house: { name: 'House', w: 2, h: 2, hp: 250, cost: { lumber: 30, stone: 10 }, housing: 6, cat: 'village', key: 'h', desc: 'Raises your subject cap by 6. New people arrive while you are under the cap and have food.' },
     barracks: { name: 'Barracks', w: 3, h: 2, hp: 600, cost: { lumber: 60, stone: 40 }, soldiers: 6, cat: 'defense', key: 'n', desc: 'Required to train soldiers. Each barracks raises your soldier cap by 6. New soldiers muster at a random barracks.' },
     tent: { name: 'Medical Tent', w: 2, h: 2, hp: 200, cost: { lumber: 40, stone: 10 }, slots: 2, cat: 'village', key: 'e', desc: 'Medics heal wounded subjects and soldiers. More tents and medics heal faster.' },
     explosives: { name: 'Explosives Research', w: 2, h: 2, hp: 300, cost: { lumber: 80, stone: 60, iron: 20 }, cat: 'village', key: 'u', desc: 'Black-powder workshop. Lets you train Demolition crews and plant explosives: traps for the enemy, or charges that blast mountains into stone and open ground.' },
     stables: { name: 'Stables', w: 3, h: 2, hp: 320, cost: { lumber: 70, stone: 20 }, horses: 4, cat: 'village', key: 'j', desc: 'Raise horses (up to 4 per Stables). Horses speed up any job, and turn Knights into Mounted Knights. Manage them from the Stables panel.' },
-    granary: { name: 'Food Storage', w: 2, h: 2, hp: 260, cost: { lumber: 40, stone: 20 }, store: { food: 400 }, cat: 'storage', key: 'y', desc: 'A granary and smokehouse. Raises the most food you can hold by 400 (the Keep holds 400). Food beyond the cap spoils.' },
-    lumberyard: { name: 'Lumber Storage', w: 2, h: 2, hp: 240, cost: { lumber: 30, stone: 10 }, store: { lumber: 400, plank: 200 }, cat: 'storage', key: '4', desc: 'A covered timber yard. Raises the most lumber you can hold by 400 and processed lumber by 200 (the Keep holds 400 lumber and 100 processed lumber). Any surplus is lost.' },
-    stoneyard: { name: 'Stone Storage', w: 2, h: 2, hp: 320, cost: { lumber: 40 }, store: { stone: 400 }, cat: 'storage', key: '5', desc: 'A walled stone yard. Raises the most stone you can hold by 400 (the Keep holds 400). Stone beyond the cap is lost.' },
-    metalstore: { name: 'Metal Storage', w: 2, h: 2, hp: 360, cost: { lumber: 30, stone: 40 }, store: { ore: 150, iron: 150 }, cat: 'storage', key: '6', desc: 'A locked strongroom for raw ore and iron. Raises the most iron ore and iron you can each hold by 150 (the Keep holds 150 of each). Any surplus is lost.' },
+    granary: { name: 'Food Storage', w: 2, h: 2, hp: 260, cost: { lumber: 40, stone: 20 }, store: { food: 800 }, cat: 'storage', key: 'y', desc: 'A granary and smokehouse. Raises the most food you can hold by 800 (the Keep holds 800). Food beyond the cap spoils.' },
+    lumberyard: { name: 'Lumber Storage', w: 2, h: 2, hp: 240, cost: { lumber: 30, stone: 10 }, store: { lumber: 800, plank: 400 }, cat: 'storage', key: '4', desc: 'A covered timber yard. Raises the most lumber you can hold by 800 and processed lumber by 400 (the Keep holds 800 lumber and 200 processed lumber). Any surplus is lost.' },
+    stoneyard: { name: 'Stone Storage', w: 2, h: 2, hp: 320, cost: { lumber: 40 }, store: { stone: 800 }, cat: 'storage', key: '5', desc: 'A walled stone yard. Raises the most stone you can hold by 800 (the Keep holds 800). Stone beyond the cap is lost.' },
+    metalstore: { name: 'Metal Storage', w: 2, h: 2, hp: 360, cost: { lumber: 30, stone: 40 }, store: { ore: 300, iron: 300 }, cat: 'storage', key: '6', desc: 'A locked strongroom for raw ore and iron. Raises the most iron ore and iron you can each hold by 300 (the Keep holds 300 of each). Any surplus is lost.' },
     farm: { name: 'Farm', w: 3, h: 3, hp: 150, cost: { lumber: 40 }, slots: 3, walkable: true, rule: 'grass', eco: true, cat: 'resources', key: 'f', desc: 'Farmers grow food. Must be built on grassland.' },
     quarry: { name: 'Stone Quarry', w: 2, h: 2, hp: 220, cost: { lumber: 40 }, slots: 3, rule: 'rock', eco: true, cat: 'resources', key: 'q', desc: 'Quarry workers cut stone. Must be built on a rock patch.' },
     mine: { name: 'Mine', w: 2, h: 2, hp: 300, cost: { lumber: 50, stone: 20 }, slots: 3, rule: 'mine', eco: true, cat: 'resources', key: 'm', desc: 'Miners dig iron ore. Must be built on a mountain mine site.' },
@@ -54,7 +54,7 @@
     { id: 'repair', name: 'Builders', icon: 'repair', desc: 'Build what you place (except farms, quarries, mines, bloomeries and lumber mills, which their own workers build), then repair damaged structures (repairs use stone).' },
     { id: 'wood', name: 'Woodcutters', icon: 'lumber', desc: 'Chop trees for lumber.' },
     { id: 'stone', name: 'Quarry workers', icon: 'stone', where: 'quarry', desc: 'Cut stone at quarries and carry 8-stone loads to the Keep.' },
-    { id: 'ore', name: 'Miners', icon: 'ore', where: 'mine', desc: 'Dig iron ore at mines and carry 7-ore loads to the Keep.' },
+    { id: 'ore', name: 'Miners', icon: 'ore', where: 'mine', desc: 'Dig iron ore at mines and carry 12-ore loads to the Keep.' },
     { id: 'smelt', name: 'Smelters', icon: 'iron', where: 'bloomery', desc: 'Smelt ore into iron.' },
     { id: 'mill', name: 'Millers', icon: 'plank', where: 'lumbermill', desc: 'Saw 2 lumber into 1 processed lumber at a Lumber Mill.' },
     { id: 'farm', name: 'Farmers', icon: 'food', where: 'farm', desc: 'Grow food on farms.' },
@@ -71,7 +71,7 @@
   K.selfBuilt = (s) => s.type === 'site' && !!K.SELF_BUILD[s.final];
 
   K.HORSE = { cost: { food: 40, lumber: 10 }, speed: 1.6 };
-  K.RATES = { farm: 0.32, stone: 0.28, ore: 0.16, smeltTime: 5, millTime: 5, eat: 0.018, chopTime: 7, chopYield: 11, digTime: 6, heal: 1.4, plantTime: 4, fuse: 3, trapDmg: 130, trapR: 2, blastR: 1.5, blastStone: 10, loadTime: 20, stoneLoad: 8, oreLoad: 7 };
+  K.RATES = { farm: 0.32, stone: 0.28, ore: 0.16, smeltTime: 5, millTime: 5, eat: 0.018, chopTime: 7, chopYield: 11, digTime: 6, heal: 1.4, plantTime: 4, fuse: 3, trapDmg: 130, trapR: 2, blastR: 1.5, blastStone: 10, loadTime: 20, stoneLoad: 8, oreLoad: 12 };
 
   K.UDEF = {
     king: { name: 'King', hp: 450, dmg: 20, range: 1.4, cd: 1, speed: 1.7, armor: 0.3 },

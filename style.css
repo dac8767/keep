@@ -61,6 +61,11 @@ button:disabled { opacity: 0.45; cursor: default; }
 #side { max-height: calc(100vh - 60px); overflow-y: auto; }
 #jobs table { width: 100%; border-collapse: collapse; }
 #jobs td { padding: 1px 2px; }
+#jobs.nohorse .hc { display: none; }
+#jobs td { white-space: nowrap; }
+#jobs:not(.nohorse) td.b button { padding: 0 4px; }
+#jobs:not(.nohorse) td.n { width: 24px; }
+#jobs td.b.hc:nth-child(5) { padding-left: 6px; }
 #jobs td.n { text-align: center; width: 28px; font-weight: bold; font-variant-numeric: tabular-nums; }
 #jobs td.b { width: 22px; }
 #jobs td.b button { padding: 0 6px; line-height: 16px; }
@@ -138,6 +143,12 @@ button:disabled { opacity: 0.45; cursor: default; }
 #custom label b { width: 92px; text-align: right; font-weight: normal; font-size: 11px; color: var(--dim); }
 #custom label b.mod { color: #f4cb4e; }
 #custom-reset { margin-top: 4px; font-size: 11px; }
+#presets { margin-top: 6px; border-top: 1px solid #0004; padding-top: 6px; }
+#presets .preset-save { display: flex; gap: 6px; }
+#presets .preset-save input { flex: 1; min-width: 0; font-size: 12px; }
+#presets .preset-save button, #preset-list button { font-size: 11px; }
+#preset-list { max-height: 140px; margin-top: 4px; }
+#preset-list .item .nm small { margin-left: 4px; }
 #btn-custom.on { color: #f4cb4e; }
 .saved-list .item .nm small.cust { color: #f4cb4e; }
 #menu .row.opts { font-size: 11px; color: var(--dim); }

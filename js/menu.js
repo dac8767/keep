@@ -103,11 +103,42 @@
       for (const d of K.MAP_OPTS) $('opt-' + d.id).oninput = label;
       $('btn-custom').onclick = () => toggle($('custom').classList.contains('hidden'));
       $('custom-reset').onclick = () => M.customUI(K.mapOpts({}));
+      if ($('preset-save')) $('preset-save').onclick = savePreset;
+      if ($('preset-name')) $('preset-name').onkeydown = (e) => { if (e.key === 'Enter') savePreset(); };
     }
     for (const d of K.MAP_OPTS) $('opt-' + d.id).value = Math.round(o[d.id] * 100);
     label();
     if (K.isCustom(o)) toggle(true);
   };
+
+  // Saved slider settings (presets), reusable with any seed.
+  const PKEY = 'keep.mapPresets';
+  function loadP() {
+    try { const a = JSON.parse(localStorage.getItem(PKEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+  }
+  function storeP(a) { try { localStorage.setItem(PKEY, JSON.stringify(a)); return true; } catch (e) { return false; } }
+  function savePreset() {
+    const inp = $('preset-name'), o = K.encodeOpts(M.customOpts());
+    const name = inp.value.trim() || 'Settings ' + (loadP().length + 1);
+    const list = loadP().filter((p) => p.name.toLowerCase() !== name.toLowerCase());
+    list.unshift({ name, opts: o, at: Date.now() });
+    if (!storeP(list)) { alert('Could not save — browser storage is unavailable.'); return; }
+    inp.value = '';
+    drawPresets();
+  }
+  function drawPresets() {
+    const el = $('preset-list');
+    if (!el) return;
+    const list = loadP(), cur = K.encodeOpts(M.customOpts());
+    el.className = 'saved-list';
+    if (!list.length) { el.innerHTML = '<div class="empty">No saved settings yet. Name the current sliders and press Save.</div>'; return; }
+    el.innerHTML = list.map((p, i) => `<div class="item${p.opts === cur ? ' cur' : ''}" title="${esc(p.opts ? K.describeOpts(K.decodeOpts(p.opts)) : 'Standard map settings')}">
+        <span class="nm">${esc(p.name)}<small>${esc(p.opts ? K.describeOpts(K.decodeOpts(p.opts)) : 'Standard')}</small></span>
+        ${p.opts === cur ? '<small>(in use)</small>' : `<button data-load="${i}">Load</button>`}
+        <button data-pdel="${i}" title="Delete these settings">✕</button></div>`).join('');
+    for (const b of el.querySelectorAll('[data-load]')) b.onclick = () => { const p = list[+b.dataset.load]; M.customUI(K.decodeOpts(p.opts)); $('preset-name').value = p.name; };
+    for (const b of el.querySelectorAll('[data-pdel]')) b.onclick = () => { const d = list[+b.dataset.pdel]; storeP(loadP().filter((p) => p.name !== d.name)); drawPresets(); };
+  }
   function toggle(on) {
     $('custom').classList.toggle('hidden', !on);
     $('btn-custom').textContent = on ? 'Customize map ▾' : 'Customize map ▸';
@@ -119,6 +150,7 @@
       $('optv-' + d.id).classList.toggle('mod', o[d.id] !== 1);
     }
     $('btn-custom').classList.toggle('on', K.isCustom(o));
+    drawPresets();
   }
   M.customOpts = function () {
     const o = {};

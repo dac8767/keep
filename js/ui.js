@@ -98,7 +98,8 @@
     let h = '<h3 class="fold" id="jobs-head" title="Click to collapse or expand">Subjects<span class="sum" id="jobs-sum"></span></h3><table>';
     for (const j of K.JOBS) {
       const sep = j.id === 'dig' || j.id === 'archer' ? ' class="sep"' : '';
-      h += `<tr${sep} data-job="${j.id}"><td>${ic(j.icon)} ${j.name}</td><td class="b"><button data-d="-1">−</button></td><td class="n" id="jn-${j.id}">0</td><td class="b"><button data-d="1">+</button></td></tr>`;
+      h += `<tr${sep} data-job="${j.id}"><td>${ic(j.icon)} ${j.name}</td><td class="b"><button data-d="-1">−</button></td><td class="n" id="jn-${j.id}">0</td><td class="b"><button data-d="1">+</button></td>`
+        + (j.id === 'idle' ? '<td class="hc" colspan="3"></td>' : `<td class="b hc"><button data-h="-1" title="Take a horse from ${j.name}">−</button></td><td class="n hc" id="jh-${j.id}">0</td><td class="b hc"><button data-h="1" title="Give a horse to ${j.name}">+</button></td>`) + '</tr>';
     }
     h += '</table><div id="jobfoot"></div>';
     $('jobs').innerHTML = h;
@@ -110,8 +111,10 @@
       const nameCell = tr.cells[0];
       nameCell.onmouseenter = (e) => tip(e, `<b>${j.name}</b><br>${j.desc}${j.soldier ? '<br>Subjects who just left civil work must rest a full round before enlisting.' : '<br>Soldiers who just left the army must wait a full round before civil work.'}${j.cost ? '<br>Training cost: ' + K.costText(j.cost) : ''}${j.soldier ? '<br>Needs a Barracks; each raises the soldier cap by ' + K.SDEF.barracks.soldiers + '.' : ''}${j.where ? '<br>Needs a ' + K.SDEF[j.where].name + ' (' + K.SDEF[j.where].slots + ' workers each).' : ''}<br><i>Shift-click: ×5</i>`, 'j:' + j.id);
       nameCell.onmouseleave = () => tip(null);
-      for (const b of tr.querySelectorAll('button'))
+      for (const b of tr.querySelectorAll('button[data-d]'))
         b.onclick = (e) => { K.assignJob(UI.G, j.id, +b.dataset.d * (e.shiftKey ? 5 : 1)); refreshJobs(); };
+      for (const b of tr.querySelectorAll('button[data-h]'))
+        b.onclick = (e) => { for (let n = e.shiftKey ? 5 : 1; n > 0; n--) K.allocHorse(UI.G, j.id, +b.dataset.h); refreshJobs(); refreshInfo(); };
     }
   }
   function refreshJobs() {
@@ -125,6 +128,25 @@
         if (p) p.disabled = c[j.id] >= sl;
       }
       $('jn-' + j.id).innerHTML = t;
+    }
+    // horses: mounted riders / horses given, shown once there are Stables
+    const hcap = K.horseCap(G);
+    $('jobs').classList.toggle('nohorse', !hcap);
+    let hfoot = '';
+    if (hcap) {
+      let given = 0;
+      for (const k in G.horseAlloc) given += G.horseAlloc[k];
+      const tot = K.horseTotal(G);
+      for (const j of K.JOBS) {
+        const el = $('jh-' + j.id);
+        if (!el) continue;
+        const m = G.units.filter((u) => u.kind === 'subject' && !u.dead && u.job === j.id && u.horse).length, a = G.horseAlloc[j.id] || 0;
+        el.innerHTML = a || m ? `${m}<span class="note">/${a}</span>` : '<span class="note">·</span>';
+        const tr = document.querySelector(`#jobs tr[data-job="${j.id}"]`);
+        tr.querySelector('button[data-h="1"]').disabled = given >= tot;
+        tr.querySelector('button[data-h="-1"]').disabled = !a;
+      }
+      hfoot = `<div class="note">${ic('horse')} Horses ${tot} / ${hcap} · ${tot - given} not given to a job — right-hand column: mounted / horses given</div>`;
     }
     const subs = K.subjects(G).length, house = K.housing(G);
     const prod = Math.min(c.farm, K.slots(G, 'farm', true)) * K.RATES.farm;
@@ -144,7 +166,7 @@
     for (const j of K.JOBS) if (j.soldier) { const p = document.querySelector(`#jobs tr[data-job="${j.id}"] button[data-d="1"]`); if (p) p.disabled = sn >= sc; }
     $('jobs-sum').textContent = c.idle + ' unassigned';
     $('jobfoot').innerHTML = `<div style="margin-top:4px">Unassigned: <span class="idle">${c.idle}</span></div>${rest}
-      <div class="note${subs > house ? ' warnc' : ''}">Subjects ${subs} / ${house} cap${subs > house ? ' — build Houses!' : ''} · Food ${net >= 0 ? '+' : ''}${net.toFixed(0)}/min${G.res.food <= 0 && subs ? ' <span class="warnc">STARVING</span>' : ''}</div>${sold}${need}`;
+      <div class="note${subs > house ? ' warnc' : ''}">Subjects ${subs} / ${house} cap${subs > house ? ' — build Houses!' : ''} · Food ${net >= 0 ? '+' : ''}${net.toFixed(0)}/min${G.res.food <= 0 && subs ? ' <span class="warnc">STARVING</span>' : ''}</div>${sold}${hfoot}${need}`;
   }
 
   // ---------- info panel ----------
@@ -250,16 +272,10 @@
       }
     }
     if (s.type === 'stables') {
-      const tot = K.horseTotal(G), cap = K.horseCap(G), c = K.jobCount(G);
+      const tot = K.horseTotal(G), cap = K.horseCap(G);
       h += `<div>${ic('horse')} Horses ${tot} / ${cap} · ${G.horses} free in the stables</div>
         <p><button id="btn-horse"${tot >= cap || !K.canAfford(G, K.HORSE.cost) ? ' disabled' : ''}>Raise a horse (${K.costText(K.HORSE.cost)})</button></p>
-        <p class="note">Give horses to a job: riders move ${K.HORSE.speed}× faster, and Knights become Mounted Knights.</p><table class="horses">`;
-      for (const j of K.JOBS) {
-        if (!c[j.id] && !G.horseAlloc[j.id]) continue;
-        const m = G.units.filter((u) => u.kind === 'subject' && !u.dead && u.job === j.id && u.horse).length;
-        h += `<tr><td>${ic(j.id === 'knight' ? 'cavalry' : j.icon)} ${j.name}</td><td class="b"><button data-hj="${j.id}" data-d="-1">−</button></td><td class="n">${m}<span class="note">/${G.horseAlloc[j.id] || 0}</span></td><td class="b"><button data-hj="${j.id}" data-d="1">+</button></td></tr>`;
-      }
-      h += '</table><p class="note">mounted / horses given</p>';
+        <p class="note">Give horses to jobs in the Subjects table (horse column): riders move ${K.HORSE.speed}× faster, and Knights become Mounted Knights.</p>`;
     }
     if (s.upg && !s.upg.engine) h += `<p><button id="btn-cancel">Cancel battlements (full refund)</button></p>`;
     if (K.isGate(s.type)) h += `<p><button id="btn-grot">⟳ Rotate gate</button> <span class="note">${s.rot ? 'north–south' : 'east–west'}</span></p>`;
@@ -284,7 +300,6 @@
       if (ba) ba.onclick = () => { K.toggleAllDrawbridges(G); refreshInfo(); };
       const bh = $('btn-horse');
       if (bh) bh.onclick = () => { K.buyHorse(G); K.updateHorses(G); refreshInfo(); refreshTop(); };
-      for (const b of el.querySelectorAll('button[data-hj]')) b.onclick = () => { K.allocHorse(G, b.dataset.hj, +b.dataset.d); refreshInfo(); };
     }
   }
 
@@ -317,6 +332,9 @@
       if (bb.textContent !== t) bb.textContent = t;
     }
     $('btn-god').classList.toggle('on', !!G.god);
+    const ak = $('btn-allkeep'), akt = G.allKeep ? 'Release all' : 'All to Keep';
+    ak.classList.toggle('on', !!G.allKeep);
+    if (ak.textContent !== akt) ak.textContent = akt;
     for (const el of document.querySelectorAll('.bitem')) {
       el.classList.toggle('no', el.dataset.type !== 'demolish' && !K.canAfford(G, K.SDEF[el.dataset.type].cost));
       el.classList.toggle('locked', !K.canBuildNow(G, el.dataset.type));
@@ -677,7 +695,6 @@
       else if (k === '1') setSpeed(1);
       else if (k === '2') setSpeed(2);
       else if (k === '3') setSpeed(4);
-      else if (k === 'i') toggleInterior();
       else if (k === 'home' || k === 'k') { const s = UI.G.kingSpot || UI.G.world.start; UI.centerOn(s.x, s.y); }
       else if (k === 'v') rotateTool();
       else if (k === '=' || k === '+') { e.preventDefault(); zoomBy(1.3, innerWidth / 2, innerHeight / 2); }
@@ -689,7 +706,12 @@
     addEventListener('keyup', (e) => { UI.keys[e.key.toLowerCase()] = false; });
     addEventListener('blur', () => { UI.keys = {}; });
     $('btn-begin').onclick = () => { const G = UI.G; if (G.phase === 'build') G.timer = Math.min(G.timer, K.RECALL_TIME + 0.01); };
-    $('btn-interior').onclick = toggleInterior;
+    $('btn-allkeep').onclick = () => {
+      const G = UI.G;
+      G.allKeep = !G.allKeep;
+      G.msg(G.allKeep ? 'Everyone is called into the Keep!' : 'Your people leave the Keep and return to their work.', G.allKeep ? 'warn' : 'info');
+      refreshTop();
+    };
     $('btn-bridges').onclick = () => { K.toggleAllDrawbridges(UI.G); refreshTop(); refreshInfo(); };
     // The info panel is re-rendered whenever its contents change (e.g. HP ticking during repairs or
     // attacks), which can replace a button between mousedown and mouseup and swallow the click.
@@ -717,7 +739,6 @@
     addEventListener('mousemove', (e) => { if (UI.mmDrag) mmGo(e); });
     addEventListener('mouseup', () => { UI.mmDrag = false; });
   }
-  function toggleInterior() { const u = UI.G.ui; u.showInterior = !u.showInterior; $('btn-interior').classList.toggle('on', u.showInterior); }
   UI.setSpeed = (s) => setSpeed(s);
   function setSpeed(s) {
     if (s === 0 && UI.speed) UI.prevSpeed = UI.speed;
@@ -731,7 +752,20 @@
     if (!K.inb(t.x, t.y) || UI.tool) return tip(null);
     const bst = (G.beasts || []).find((b) => !b.dead && Math.hypot(b.x - t.x - 0.5, b.y - t.y - 0.5) < 1.3);
     G.ui.hoverBeast = bst || null;
-    if (bst) { const d = K.BEASTS[bst.kind]; return tip(e, `<b>${d.name}</b> ${Math.ceil(bst.hp)}/${bst.maxHp}<br>Roams up to ${d.roam} tiles from its lair (red circle) and attacks anyone — friend or foe — who comes near. Cannot pass or bite through walls.`, bst); }
+    const mon = (G.monsters || []).find((m) => Math.hypot(m.x - t.x - 0.5, m.y - t.y - 0.5) < 1.3);
+    if (mon && !bst) {
+      const croc = mon.kind === 'croc';
+      return tip(e, `<b>${croc ? 'Crocodile' : 'Tentacle Monster'}</b><br>${croc ? 'Lurks in the rivers (and moats joined to them) and seizes anyone — friend or foe — in the water.' : 'Roams its lake and any moat joined to it, seizing anyone — friend or foe — in the water or on the shore beside it. Your people keep a step back from the shore when it is near.'} Units on bridges are safe.`, mon);
+    }
+    if (bst) {
+      const d = K.BEASTS[bst.kind], sx = bst.sex === 'm' ? '♂ male' : '♀ female', f = bst.sex === 'f' ? bst : null;
+      let br;
+      if (bst.young) br = `Young — fully grown in ${Math.ceil(bst.growT)}s.`;
+      else if (!K.beastCanBreed(G, bst)) br = 'Newly grown — cannot breed until after the next siege.';
+      else if (f && f.mate) br = `<span class="warnc">Breeding — young due in ${Math.ceil(K.BEAST_BREED - f.breedT)}s.</span>`;
+      else br = `Will breed with a ${bst.sex === 'm' ? 'female' : 'male'} that comes within ${d.aggro} tiles (one young every ${K.BEAST_BREED / 60} min, at most ${K.BEAST_LAIR_CAP} per lair).`;
+      return tip(e, `<b>${d.name}</b> ${sx} ${Math.ceil(bst.hp)}/${bst.maxHp}<br>${br}<br>Roams up to ${d.roam} tiles from its lair (red circle) and attacks anyone — friend or foe — who comes near. ${d.fly ? 'Flies over walls, water and mountains and can snatch archers off the battlements — but archers can shoot it down.' : bst.kind === 'wolf' ? 'Hunts with its pack and chases far. Cannot pass or bite through walls.' : 'Cannot pass or bite through walls.'}`, 'bst' + bst.kind + bst.hp + br);
+    }
     if (G.phase === 'place') return tip(null);
     let h = '', key = null;
     const s = w.structAt(t.x, t.y);

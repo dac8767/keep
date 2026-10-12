@@ -41,13 +41,13 @@
 
   // Custom-map sliders (1 = the standard map; percentages in the UI).
   K.MAP_OPTS = [
-    { id: 'water', name: 'Water', min: 0, max: 5, tip: 'Lakes and rivers' },
-    { id: 'mountains', name: 'Mountains', min: 0.25, max: 5, tip: 'Mountain ranges (needed for mines)' },
-    { id: 'trees', name: 'Trees', min: 0, max: 5, tip: 'Forests to harvest for lumber' },
-    { id: 'rock', name: 'Rock patches', min: 0, max: 5, tip: 'Rock patches for quarries' },
-    { id: 'mines', name: 'Mine sites', min: 0.25, max: 5, tip: 'Mountain mine sites for iron ore' },
-    { id: 'beasts', name: 'Beasts', min: 0, max: 5, tip: 'Spider and troll lairs' },
-    { id: 'difficulty', name: 'Enemy difficulty', min: 0.5, max: 5, tip: 'Size and toughness of the besieging armies' },
+    { id: 'water', name: 'Water', min: 0, max: 10, tip: 'Lakes and rivers' },
+    { id: 'mountains', name: 'Mountains', min: 0.25, max: 10, tip: 'Mountain ranges (needed for mines)' },
+    { id: 'trees', name: 'Trees', min: 0, max: 10, tip: 'Forests to harvest for lumber' },
+    { id: 'rock', name: 'Rock patches', min: 0, max: 10, tip: 'Rock patches for quarries' },
+    { id: 'mines', name: 'Mine sites', min: 0.25, max: 10, tip: 'Mountain mine sites for iron ore' },
+    { id: 'beasts', name: 'Beasts', min: 0, max: 10, tip: 'Spider, troll, dire wolf and wyvern lairs' },
+    { id: 'difficulty', name: 'Enemy difficulty', min: 0.5, max: 10, tip: 'Size and toughness of the besieging armies' },
   ];
   K.mapOpts = function (o) {
     const out = {};
@@ -62,6 +62,8 @@
     for (const part of String(s || '').split('.')) { const m = /^([a-z]+)(\d+)$/.exec(part); if (m) o[m[1]] = +m[2] / 100; }
     return K.mapOpts(o);
   };
+  // share of the land that is mountain: linear to 50% at 500%, then slower, always leaving open land for a Keep
+  const mtnFrac = (O) => Math.min(O.mountains <= 5 ? 0.1 * O.mountains : 0.5 + 0.04 * (O.mountains - 5), Math.max(0.05, 0.8 - 0.055 * O.water));
   // counts are tuned for a 256x256 map and scale with area
   const scaleN = (n, f) => Math.round(n * f * (N * N) / 65536);
 
@@ -81,7 +83,7 @@
         if (edge < 8) e = e * (0.75 + edge * 0.03) + 0.1 * (1 - edge / 8);
         h[y * N + x] = e;
       }
-    const lakeLv = O.water > 0 ? percentile(h, 0.055 * O.water) : -Infinity, mtnLv = percentile(h, 1 - 0.1 * O.mountains);
+    const lakeLv = O.water > 0 ? percentile(h, 0.055 * O.water) : -Infinity, mtnLv = percentile(h, 1 - mtnFrac(O));
     const lv1 = percentile(h, 0.3), lv2 = percentile(h, 0.55), lv3 = percentile(h, 0.76);
     for (let i = 0; i < N * N; i++) {
       const e = h[i];

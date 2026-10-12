@@ -10,7 +10,23 @@
   K.BEASTS = {
     spider: { name: 'Giant Spider', hp: 420, dmg: 16, cd: 0.9, speed: 2.6, aggro: 3.2, roam: 9, leash: 11, range: 1.25, regen: 6 },
     troll: { name: 'Cave Troll', hp: 900, dmg: 38, cd: 1.9, speed: 1.6, aggro: 2.8, roam: 7, leash: 9, range: 1.5, regen: 8 },
+    // dire wolves hunt in packs, chase further than other beasts and close in on a packmate's prey
+    wolf: { name: 'Dire Wolf', hp: 240, dmg: 13, cd: 0.8, speed: 3.6, aggro: 4.5, roam: 12, leash: 17, range: 1.1, regen: 5, cap: 8 },
+    // wyverns fly: over walls, water and mountains, and can snatch archers off the battlements,
+    // but they are lightly built and archers can shoot them down
+    wyvern: { name: 'Wyvern', hp: 380, dmg: 26, cd: 1.5, speed: 3.2, aggro: 4.5, roam: 13, leash: 16, range: 1.4, regen: 4, fly: true },
   };
+  // Breeding: a male and female of the same kind within reach of each other produce a young
+  // every BREED seconds; the young grows up after GROW seconds and then rests a full round
+  // before it can breed. LAIR_CAP keeps a single lair from overrunning the map.
+  K.BEAST_BREED = 120; K.BEAST_GROW = 120; K.BEAST_LAIR_CAP = 6;
+  K.BEAST_YOUNG = 0.35; // young beasts' share of adult health and bite
+  const mkBeast = (kind, x, y, hx, hy, sex, phase) => {
+    const d = K.BEASTS[kind];
+    return { kind, sex, x, y, hx, hy, hp: d.hp, maxHp: d.hp, cd: 0, tgt: null, face: 1, atk: 0, wait: 0, gx: null, gy: null, hurtT: 0, phase, moving: false, breedT: 0 };
+  };
+  const flies = (b) => !!K.BEASTS[b.kind].fly;
+  K.beastCanBreed = (G, b) => !b.dead && !b.young && (b.noBreedUntil ?? -1) < G.round;
 
   // Choose lairs for a new map (spiders in forests, trolls beside mountains).
   K.placeBeasts = function (G) {
@@ -44,15 +60,47 @@
     if (bf > 0) pick('spider', 1, (x, y) => forest(x, y) && K.dist(x, y, s.x, s.y) < 34, 18);
     pick('spider', n(4), forest, 30);
     pick('troll', n(3), cliff, 30);
-    G.beasts = lairs.map((l) => {
-      const d = K.BEASTS[l.kind];
-      return { kind: l.kind, x: l.x + 0.5, y: l.y + 0.5, hx: l.x + 0.5, hy: l.y + 0.5, hp: d.hp, maxHp: d.hp, cd: 0, tgt: null, face: 1, atk: 0, wait: 0, gx: null, gy: null, hurtT: 0, phase: R() * 10, moving: false };
-    });
+    pick('wolf', n(2), forest, 30);
+    const peak = (x, y) => {
+      let m = 0;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (w.t(x + dx, y + dy) === T.MOUNTAIN) m++;
+      return w.t(x, y) === T.MOUNTAIN && m >= 18;
+    };
+    pick('wyvern', n(1.5), peak, 36);
+    G.beasts = [];
+    for (const l of lairs) {
+      const hx = l.x + 0.5, hy = l.y + 0.5;
+      if (l.kind !== 'wolf') { G.beasts.push(mkBeast(l.kind, hx, hy, hx, hy, R() < 0.5 ? 'm' : 'f', R() * 10)); continue; }
+      // a pack of 3-4 with both sexes; packs only begin breeding after the first siege
+      const k = 3 + (R() < 0.5 ? 1 : 0);
+      for (let j = 0; j < k; j++) {
+        const b = mkBeast('wolf', hx + (R() - 0.5) * 2, hy + (R() - 0.5) * 2, hx, hy, j === 0 ? 'm' : j === 1 ? 'f' : R() < 0.5 ? 'm' : 'f', R() * 10);
+        b.noBreedUntil = 0; G.beasts.push(b);
+      }
+    }
     // structures cannot be dropped right on top of a beast
-    G.beastBlocks = (x, y, bw, bh) => G.beasts.some((b) => !b.dead && b.x > x - 0.6 && b.x < x + bw + 0.6 && b.y > y - 0.6 && b.y < y + bh + 0.6);
+    G.beastBlocks = (x, y, bw, bh) => G.beasts.some((b) => !b.dead && !flies(b) && b.x > x - 0.6 && b.x < x + bw + 0.6 && b.y > y - 0.6 && b.y < y + bh + 0.6);
   };
 
-  function bPass(w, x, y) {
+  // After cropping to the realm: if no wyvern survived the crop, nest one on a peak inside it.
+  K.ensureWyvern = function (G, kx, ky) {
+    const w = G.world, R = G.rand, n = K.PLAY_N, bf = G.opts ? G.opts.beasts : 1;
+    if (bf <= 0 || G.beasts.some((b) => b.kind === 'wyvern')) return;
+    const cand = [];
+    for (let y = 8; y < n - 8; y++) for (let x = 8; x < n - 8; x++) {
+      if (w.t(x, y) !== T.MOUNTAIN || K.dist(x, y, kx, ky) < 36) continue;
+      let m = 0;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (w.t(x + dx, y + dy) === T.MOUNTAIN) m++;
+      if (m < 18 || !w.entries.every((e) => K.dist(x, y, e.x, e.y) >= 20)) continue;
+      if (!G.beasts.every((b) => K.dist(x, y, b.hx, b.hy) >= 22)) continue;
+      cand.push([x, y]);
+    }
+    if (!cand.length) return;
+    const [x, y] = cand[Math.floor(R() * cand.length)];
+    G.beasts.push(mkBeast('wyvern', x + 0.5, y + 0.5, x + 0.5, y + 0.5, R() < 0.5 ? 'm' : 'f', R() * 10));
+  };
+
+  function bPassG(w, x, y) {
     if (!K.inb(x, y)) return false;
     const i = K.idx(x, y), t = w.terrain[i];
     if (t === T.MOUNTAIN || K.isWater(t)) return false;
@@ -70,6 +118,7 @@
   }
   function step(G, b, tx, ty, sp, dt) {
     const w = G.world, dx = tx - b.x, dy = ty - b.y, d = Math.hypot(dx, dy);
+    const bPass = flies(b) ? (w2, x, y) => K.inb(x, y) : bPassG;
     if (d < 0.05) { b.moving = false; return true; }
     const s = Math.min(d, sp * dt), nx = b.x + (dx / d) * s, ny = b.y + (dy / d) * s;
     if (Math.abs(dx) > 0.05) b.face = dx > 0 ? 1 : -1;
@@ -81,24 +130,87 @@
     return null; // blocked
   }
 
+  function breed(G, dt) {
+    const w = G.world;
+    for (const b of G.beasts) {
+      if (b.dead || !b.young) continue;
+      b.growT -= dt;
+      if (b.growT > 0) continue;
+      // grows up: full size, and rests a full round before it may breed
+      const d = K.BEASTS[b.kind];
+      b.young = false; b.hp += d.hp - b.maxHp; b.maxHp = d.hp; b.noBreedUntil = G.round + 1;
+    }
+    const born = [];
+    for (const f of G.beasts) {
+      if (f.sex !== 'f' || !K.beastCanBreed(G, f)) continue;
+      const reach = K.BEASTS[f.kind].aggro;
+      const mate = G.beasts.find((m) => m.sex === 'm' && m.kind === f.kind && K.beastCanBreed(G, m) &&
+        Math.hypot(m.x - f.x, m.y - f.y) <= reach && (flies(f) || clear(w, f.x, f.y, m.x, m.y)));
+      f.mate = mate || null;
+      if (!mate) continue;
+      f.breedT = (f.breedT || 0) + dt;
+      if (f.breedT < K.BEAST_BREED) continue;
+      f.breedT = 0;
+      const brood = G.beasts.filter((v) => !v.dead && v.hx === f.hx && v.hy === f.hy).length + born.filter((v) => v.hx === f.hx && v.hy === f.hy).length;
+      if (brood >= (K.BEASTS[f.kind].cap || K.BEAST_LAIR_CAP)) continue;
+      const d = K.BEASTS[f.kind], c = mkBeast(f.kind, f.x, f.y, f.hx, f.hy, G.rand() < 0.5 ? 'm' : 'f', G.rand() * 10);
+      for (const [dx, dy] of K.DIRS8) if (flies(f) || bPassG(w, Math.floor(f.x + dx * 0.6), Math.floor(f.y + dy * 0.6))) { c.x = f.x + dx * 0.6; c.y = f.y + dy * 0.6; break; }
+      c.young = true; c.growT = K.BEAST_GROW; c.maxHp = c.hp = Math.round(d.hp * K.BEAST_YOUNG);
+      born.push(c);
+      G.msg(`A young ${d.name.toLowerCase()} has ${f.kind === 'spider' ? 'hatched' : 'been born'} — it will be fully grown in ${Math.round(K.BEAST_GROW / 60)} minutes.`, 'warn');
+    }
+    G.beasts.push(...born);
+  }
+
+  function slain(G, b) {
+    b.dead = true;
+    G.msg(`The ${K.BEASTS[b.kind].name.toLowerCase()} has been slain!`, 'good');
+    for (let k = 0; k < 6; k++) G.particles.push({ kind: 'dust', x: b.x + (Math.random() - 0.5), y: b.y + (Math.random() - 0.5), vx: Math.random() - 0.5, vy: -0.5, life: 1, max: 1 });
+  }
+  // Archers (and any other ranged unit, either side) loose arrows at a wyvern overhead.
+  function shootFlyers(G, dt) {
+    for (const b of G.beasts) {
+      if (b.dead || !flies(b)) continue;
+      K.around(G, b.x, b.y, 8, (v) => {
+        if (v.dead || v.hidden || v.retreat) return;
+        const st = K.unitStats(v);
+        if (!st || !st.ranged || !st.dmg) return;
+        if (Math.hypot(v.x - b.x, v.y - b.y) > (st.range || 6) + (v.onWall ? 1 : 0)) return;
+        v.flyCd = (v.flyCd || 0) - dt;
+        if (v.flyCd > 0 || v.cd > 0) return;
+        // shares the unit's normal attack cooldown, so a shot at a wyvern costs a shot at the enemy
+        v.flyCd = (st.cd || 1) * 1.3; v.cd = st.cd * (0.9 + Math.random() * 0.2);
+        K.shoot(G, 'arrow', v.x, v.y - 0.6, b.x, b.y - 1, { beast: b, dmg: st.dmg, team: v.team });
+      });
+    }
+  }
+
   K.updateBeasts = function (G, dt) {
     if (!G.beasts) return;
     const w = G.world;
+    breed(G, dt);
+    shootFlyers(G, dt);
     for (const b of G.beasts) {
       if (b.dead) continue;
-      const d = K.BEASTS[b.kind];
+      const d = K.BEASTS[b.kind], fly = !!d.fly;
+      if (b.hp <= 0) { slain(G, b); continue; }
       b.cd -= dt; b.atk -= dt; b.hurtT -= dt;
       if (b.hurtT <= 0 && b.hp < b.maxHp) b.hp = Math.min(b.maxHp, b.hp + d.regen * dt);
       // if a wall was built right where it stands, nudge it off
-      if (!bPass(w, Math.floor(b.x), Math.floor(b.y))) {
-        for (const [dx, dy] of K.DIRS8) if (bPass(w, Math.floor(b.x) + dx, Math.floor(b.y) + dy)) { b.x = Math.floor(b.x) + dx + 0.5; b.y = Math.floor(b.y) + dy + 0.5; break; }
+      if (!fly && !bPassG(w, Math.floor(b.x), Math.floor(b.y))) {
+        for (const [dx, dy] of K.DIRS8) if (bPassG(w, Math.floor(b.x) + dx, Math.floor(b.y) + dy)) { b.x = Math.floor(b.x) + dx + 0.5; b.y = Math.floor(b.y) + dy + 0.5; break; }
       }
       const inLeash = (v) => Math.hypot(v.x - b.hx, v.y - b.hy) < d.leash + 1;
-      const valid = (v) => !v.dead && !v.hidden && !v.retreat && !(v.onWall && w.structAt(Math.floor(v.x), Math.floor(v.y))) && inLeash(v) && clear(w, b.x, b.y, v.x, v.y);
+      const valid = (v) => !v.dead && !v.hidden && !v.retreat && (fly || !(v.onWall && w.structAt(Math.floor(v.x), Math.floor(v.y)))) && inLeash(v) && (fly || clear(w, b.x, b.y, v.x, v.y));
       if (b.tgt && (!valid(b.tgt) || Math.hypot(b.tgt.x - b.x, b.tgt.y - b.y) > d.aggro + 3)) b.tgt = null;
       if (!b.tgt) {
         const a = K.nearest(G, b.x, b.y, d.aggro, 0, valid), e = K.nearest(G, b.x, b.y, d.aggro, 1, valid);
         b.tgt = a && e ? (Math.hypot(a.x - b.x, a.y - b.y) < Math.hypot(e.x - b.x, e.y - b.y) ? a : e) : a || e;
+        // the pack joins in: a wolf takes up any prey a packmate is chasing
+        if (!b.tgt && b.kind === 'wolf') {
+          const mate = G.beasts.find((o) => o !== b && !o.dead && o.kind === 'wolf' && o.hx === b.hx && o.hy === b.hy && o.tgt && valid(o.tgt));
+          if (mate) b.tgt = mate.tgt;
+        }
         if (b.tgt && b.tgt.team === 0 && !(b.warned > G.time)) {
           b.warned = G.time + 30;
           G.msg(`A ${d.name.toLowerCase()} is attacking your ${b.tgt.kind === 'king' ? 'King' : 'people'}!`, 'bad');
@@ -110,7 +222,7 @@
           b.moving = false; b.face = t.x > b.x ? 1 : -1;
           if (b.cd <= 0) {
             b.cd = d.cd; b.atk = 0.35;
-            K.damage(G, t, d.dmg);
+            K.damage(G, t, d.dmg * (b.young ? K.BEAST_YOUNG : 1));
             G.particles.push({ kind: 'dust', x: t.x, y: t.y - 0.3, vx: 0, vy: -0.4, life: 0.5, max: 0.5 });
           }
         } else if (step(G, b, t.x, t.y, d.speed, dt) === null) b.tgt = null;
@@ -121,11 +233,7 @@
           if (v.kind === 'subject' && v !== t) return;
           b.hp -= (st.dmg / (st.cd || 1)) * dt * 0.8; b.hurtT = 4;
         });
-        if (b.hp <= 0) {
-          b.dead = true;
-          G.msg(`The ${d.name.toLowerCase()} has been slain!`, 'good');
-          for (let k = 0; k < 6; k++) G.particles.push({ kind: 'dust', x: b.x + (Math.random() - 0.5), y: b.y + (Math.random() - 0.5), vx: Math.random() - 0.5, vy: -0.5, life: 1, max: 1 });
-        }
+        if (b.hp <= 0) slain(G, b);
         continue;
       }
       // wander around the lair
@@ -136,7 +244,7 @@
         for (let k = 0; k < 8; k++) {
           const a = G.rand() * Math.PI * 2, r = (out ? 0.4 : 1) * Math.sqrt(G.rand()) * d.roam;
           b.gx = b.hx + Math.cos(a) * r; b.gy = b.hy + Math.sin(a) * r;
-          if (bPass(w, Math.floor(b.gx), Math.floor(b.gy))) break;
+          if (fly || bPassG(w, Math.floor(b.gx), Math.floor(b.gy))) break;
         }
       }
       const r = step(G, b, b.gx, b.gy, d.speed * 0.35, dt);
