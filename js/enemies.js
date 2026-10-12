@@ -55,7 +55,7 @@
     return K.unitStats(u).speed * f * far;
   }
 
-  const SMASH = { house: 1, tent: 1, catapult: 1, trebuchet: 1, gate: 1 };
+  const SMASH = { house: 1, tent: 1, catapult: 1, trebuchet: 1, gate: 1, irongate: 1 };
   // anything standing outside the walls (farms, quarries, mines, bloomeries, houses…) is fair game
   function outsideStruct(G, s) {
     if (s.type === 'wall' || s.type === 'keep') return false;
@@ -67,7 +67,7 @@
   function structTarget(G, u, r, filter, minR) {
     let best = null, bd = r;
     for (const s of G.world.structs.values()) {
-      if ((K.SDEF[s.type].eco && !outsideStruct(G, s)) || (filter && !filter(s))) continue;
+      if (K.SDEF[s.type].noRaze || (K.SDEF[s.type].eco && !outsideStruct(G, s)) || (filter && !filter(s))) continue;
       const d = Math.hypot(s.x + s.w / 2 - u.x, s.y + s.h / 2 - u.y);
       if (minR && d < minR) continue;
       if (d < bd) { bd = d; best = s; }
@@ -116,20 +116,20 @@
         return;
       }
     } else if (st.siege === 'ballista') {
-      const t = K.nearest(G, u.x, u.y, st.range, 0, (v) => v.onWall || v.kind === 'king') || K.nearest(G, u.x, u.y, st.range, 0);
+      const uh = K.unitH(G, u), t = K.nearestRanged(G, u.x, u.y, st.range, uh, 0, (v) => v.onWall || v.kind === 'king') || K.nearestRanged(G, u.x, u.y, st.range, uh, 0);
       if (t) {
         u.moving = false; u.face = t.x > u.x ? 1 : -1;
         if (u.cd <= 0) { u.cd = st.cd; u.atkAnim = 0.4; K.shoot(G, 'bolt', u.x, u.y - 0.6, t.x, t.y - 0.4, { team: 1, dmg: st.dmg, target: t }); }
         return;
       }
-      const s = structTarget(G, u, st.range, (s) => s.type === 'catapult' || s.type === 'trebuchet');
+      const s = structTarget(G, u, st.range, (s) => s.type === 'catapult' || s.type === 'trebuchet' || !!s.engine);
       if (s) {
         u.moving = false;
         if (u.cd <= 0) { u.cd = st.cd; u.atkAnim = 0.4; K.shoot(G, 'bolt', u.x, u.y - 0.6, s.x + 0.5, s.y + 0.5, { team: 1, dmg: st.dmg * 1.5, struct: s }); }
         return;
       }
     } else if (st.ranged) {
-      const t = K.nearest(G, u.x, u.y, st.range, 0, (v) => v.kind === 'king') || K.nearest(G, u.x, u.y, st.range, 0);
+      const uh = K.unitH(G, u), t = K.nearestRanged(G, u.x, u.y, st.range, uh, 0, (v) => v.kind === 'king') || K.nearestRanged(G, u.x, u.y, st.range, uh, 0);
       if (t) {
         u.moving = false; u.face = t.x > u.x ? 1 : -1;
         if (u.cd <= 0) { u.cd = st.cd * (0.9 + Math.random() * 0.3); u.atkAnim = 0.25; K.shoot(G, 'arrow', u.x, u.y - 0.8, t.x + (Math.random() - 0.5) * 0.5, t.y - 0.4, { team: 1, dmg: st.dmg, target: t }); }
@@ -206,7 +206,7 @@
     const can = w.eCan(c, best);
     const bx = best & NM, by = best >> NS;
     // open water ahead: engineers bridge or fill it under cover; everyone else waits on the bank
-    if (can === 2 && K.isWater(w.terrain[best])) {
+    if (can === 2 && K.isWater(w.terrain[best]) && !w.sgrid[best]) {
       u.moving = false; u.face = bx + 0.5 > u.x ? 1 : -1;
       if (st.engineer) engineerWork(G, u, best, dt);
       return;
@@ -367,7 +367,7 @@
     const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0) * 3);
     for (let k = 1; k < n; k++) {
       const s = w.structAt(Math.floor(x0 + (x1 - x0) * k / n), Math.floor(y0 + (y1 - y0) * k / n));
-      if (s && (s.type === 'wall' || s.type === 'gate' || s.type === 'keep' || s.type === 'keepdoor')) return false;
+      if (s && (s.type === 'wall' || K.isGate(s.type) || s.type === 'keep' || s.type === 'keepdoor')) return false;
     }
     return true;
   }
@@ -399,21 +399,36 @@
 
   // ---------------- player artillery ----------------
   K.updateStructs = function (G, dt) {
-    for (const s of G.world.structs.values()) {
+    const w = G.world;
+    for (const s of w.structs.values()) {
       if (s.hitT > 0) s.hitT -= dt;
       if (s.fired > 0) s.fired -= dt;
-      const d = K.SDEF[s.type];
+      let d = K.SDEF[s.type], e = s, lift = 0;
+      if (s.type === 'wall') {
+        if (s.engPart && !K.engineHost(w, s)) s.engPart = null;
+        const ek = s.engine ? s.engine.type : s.upg && s.upg.engine;
+        if (!ek) continue;
+        // a mounted engine needs every wall under it standing, with its battlements
+        if (!(s.engParts || []).every((id) => { const o = w.structs.get(id); return o && o.battlement && o.engPart === s.id; }) || !s.battlement) {
+          if (s.engine) G.msg('A mounted ' + K.SDEF[ek].name.toLowerCase() + ' crashes down from the ruined wall!', 'bad');
+          K.unmountEngine(G, s, !s.engine);
+          continue;
+        }
+        if (!s.engine) continue;
+        e = s.engine; d = K.SDEF[e.type]; lift = K.WALL_LIFT;
+        if (e.fired > 0) e.fired -= dt;
+      }
       if (!d.range) continue;
-      s.reload -= dt;
-      if (G.phase !== 'defense' || s.reload > 0) continue;
-      const cx = s.x + s.w / 2, cy = s.y + s.h / 2;
-      const t = K.nearest(G, cx, cy, d.range, 1, (v, dd) => dd > (d.minRange || 2.5) && !v.retreat);
+      e.reload = (e.reload || 0) - dt;
+      if (G.phase !== 'defense' || e.reload > 0) continue;
+      const cx = s.x + d.w / 2, cy = s.y + d.h / 2;
+      const t = K.nearestRanged(G, cx, cy, d.range, K.groundH(w, cx, cy) + lift, 1, (v, dd) => dd > (d.minRange || 2.5) && !v.retreat);
       if (!t) continue;
       if (G.res.stone < d.ammo) { if (!G.ammoWarn || G.time - G.ammoWarn > 20) { G.ammoWarn = G.time; G.msg('Your siege engines are out of stone!', 'warn'); } continue; }
       G.res.stone -= d.ammo;
-      s.reload = d.reload; s.fired = 0.6;
+      e.reload = d.reload; e.fired = 0.6;
       // lead the target a little
-      K.shoot(G, 'stone', cx, cy - 1, t.x + (Math.random() - 0.5) * 0.8, t.y + (Math.random() - 0.5) * 0.8, { team: 0, dmg: d.dmg, splash: d.splash });
+      K.shoot(G, 'stone', cx, cy - 1 - lift * 0.3, t.x + (Math.random() - 0.5) * 0.8, t.y + (Math.random() - 0.5) * 0.8, { team: 0, dmg: d.dmg, splash: d.splash });
     }
   };
 

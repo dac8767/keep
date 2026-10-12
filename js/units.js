@@ -61,13 +61,25 @@
     if (u.team === 1) G.stats.kills++;
     else if (u.kind === 'subject') { G.stats.lost++; G.msg((u.job === 'idle' ? 'A subject' : 'One of your ' + K.JOB[u.job].name.toLowerCase()) + ' has fallen.', 'bad'); }
   };
+  // ---- height: higher ground (and the top of a wall) shoots further ----
+  K.HEIGHT_STEP = 0.12; // +12% range per level above the target, up to 4 levels
+  K.WALL_LIFT = 2;      // standing on a wall counts as two levels up
+  K.groundH = (w, x, y) => { x = Math.floor(x); y = Math.floor(y); return K.inb(x, y) ? Math.min(3, w.elev[K.idx(x, y)]) : 0; };
+  K.unitH = (G, v) => K.groundH(G.world, v.x, v.y) + (v.onWall ? K.WALL_LIFT : 0);
+  K.rangeVs = (base, h1, h2) => base * (1 + K.HEIGHT_STEP * Math.max(0, Math.min(4, h1 - h2)));
+  // nearest target within range, where range grows with the shooter's height over each target
+  K.nearestRanged = function (G, x, y, base, h, team, filter) {
+    return K.nearest(G, x, y, base * (1 + 4 * K.HEIGHT_STEP), team, (v, d) => d <= K.rangeVs(base, h, K.unitH(G, v)) && (!filter || filter(v, d)));
+  };
+  // the wall that carries a mounted siege engine (s itself, or the anchor wall of a trebuchet)
+  K.engineHost = (w, s) => (s && s.type === 'wall' ? (s.engine || (s.upg && s.upg.engine) ? s : s.engPart ? w.structs.get(s.engPart) || null : null) : null);
   K.damageStruct = function (G, s, dmg) {
-    if (!G.world.structs.has(s.id) || G.god || K.SDEF[s.type].eco) return;
+    if (!G.world.structs.has(s.id) || G.god || K.SDEF[s.type].eco || K.SDEF[s.type].noRaze) return;
     s.hp -= dmg;
     s.hitT = 0.15;
     if (s.hp <= 0) K.destroyStruct(G, s);
   };
-  const SOLID = { wall: 1, gate: 1, keepdoor: 1, keep: 1, house: 1, tent: 1, quarry: 1, mine: 1, bloomery: 1, lumbermill: 1, catapult: 1, trebuchet: 1 };
+  const SOLID = { wall: 1, gate: 1, irongate: 1, keepdoor: 1, keep: 1, house: 1, tent: 1, quarry: 1, mine: 1, bloomery: 1, lumbermill: 1, catapult: 1, trebuchet: 1 };
   // Can a melee attack happen between a and b? (walls block, wall-top units only reachable from walls)
   K.meleeOk = function (G, a, b) {
     if (!!a.onWall !== !!b.onWall) return false;
@@ -86,7 +98,7 @@
       const i = K.idx(x, y);
       if (i === a || i === b) continue;
       const s = w.structAt(x, y);
-      if (s && (s.type === 'wall' || s.type === 'gate' || s.type === 'keep' || s.type === 'keepdoor')) return true;
+      if (s && (s.type === 'wall' || K.isGate(s.type) || s.type === 'keep' || s.type === 'keepdoor')) return true;
     }
     return false;
   };
@@ -173,6 +185,7 @@
   // ---------- friendly AI ----------
   function hide(G, u, dt) {
     const w = G.world, k = w.keep;
+    if (u.onWall && u.job !== 'archer') { K.stepOffWall(G, u); u.wb = null; u.wpath = null; }
     if (!k) return wander(G, u, dt, G.kingSpot.x, G.kingSpot.y, 3);
     const r = goTo(G, u, dt, adjTo(w, (j) => w.sgrid[j] === k.id), k.x + 1, k.y + 1, 'keep');
     if (r) { deposit(G, u); u.hidden = true; u.path = null; u.moving = false; K.releaseJob(G, u); u.state = null; }
@@ -302,10 +315,10 @@
     return comp;
   }
   // Tiles reachable from the Keep if the tiles in `wet` turned to water.
-  function keepRegion(w, wet) {
+  function keepRegion(w, wet, lowered) {
     const k = w.keep;
     if (!k) return null;
-    const pass = (i) => !wet.has(i) && w.fPass(i);
+    const pass = (i) => !wet.has(i) && (w.fPass(i) || (lowered && w.sgrid[i] && w.structs.get(w.sgrid[i]).type === 'drawbridge'));
     const seen = new Uint8Array(N * N), q = [];
     for (let y = k.y - 1; y <= k.y + 3; y++)
       for (let x = k.x - 1; x <= k.x + 3; x++) {
@@ -327,6 +340,13 @@
     }
     return seen;
   }
+  K.keepRegion = keepRegion;
+  // Everywhere a subject can walk to from the Keep (drawbridges counted as lowered), cached per world change.
+  K.homeRegion = function (G) {
+    const w = G.world;
+    if (G.homeV !== w.version || G.homeW !== w) { G.homeV = w.version; G.homeW = w; G.home = keepRegion(w, new Set(), true); }
+    return G.home;
+  };
   const standsOf = (w, t, ok) => {
     const out = [], x = t & NM, y = t >> NS;
     for (const [dx, dy] of K.DIRS8) {
@@ -373,7 +393,12 @@
     }
     pairs.sort((a, b) => a[0] - b[0]);
     const home0 = keepRegion(w, new Set());
-    const workable = home0 ? tiles.filter((t) => standsOf(w, t, (j) => home0[j]).length) : [];
+    // every marked tile and construction job that can be reached now must stay reachable
+    const needs = [];
+    if (home0) {
+      for (const t of w.plan) { const st = standsOf(w, t, () => true); if (st.some((j) => home0[j])) needs.push({ t, st }); }
+      for (const o of w.structs.values()) if (o.type === 'site' || o.upg) { const st = K.buildSpots(w, o); if (st.some((j) => home0[j])) needs.push({ t: -1, st }); }
+    }
     const doneU = new Set(), doneT = new Set(), deferred = new Set();
     const memo = new Map();
     const wetOf = (t) => {
@@ -399,14 +424,18 @@
         if (f) {
           const { wet, home } = f;
           ok = (j) => comp[j] === c && !wet.has(j) && home[j];
-          if (strict) for (const p of workable) if (p !== t && !doneT.has(p) && !standsOf(w, p, (j) => !wet.has(j) && home[j]).length) return null;
+          if (strict) for (const n of needs) if (n.t !== t && !doneT.has(n.t) && !n.st.some((j) => !wet.has(j) && home[j])) return null;
         }
       }
       const st = standsOf(w, t, ok);
       return st.length ? st : null;
     };
+    // a cut-off is only accepted when nothing else can be dug at all (one tile at a time)
+    const busy = () => doneT.size || G.units.some((v) => v.job === 'dig' && v.digging > 0 && !v.dead);
     for (const strict of [true, false]) {
+      if (!strict && busy()) break;
       for (const [, u, t] of pairs) {
+        if (!strict && doneT.size) break;
         if (doneU.has(u) || doneT.has(t) || (strict && deferred.has(t))) continue;
         const st = tryPair(u, t, strict);
         if (!st) { deferred.add(t); continue; }
@@ -451,9 +480,9 @@
     let best = -1, bd = 1e9;
     for (const [i, c] of w.charges) {
       if (c.state !== 'planned' || G.reserved.has('c' + i) || bad.get(i) > G.time) continue;
-      // blast mountains from the edge inward
+      // blast mountains and rock patches from the edge inward
       let open = 0;
-      for (const [dx, dy] of K.DIRS4) { const x = (i & NM) + dx, y = (i >> NS) + dy; if (K.inb(x, y) && w.terrain[K.idx(x, y)] !== T.MOUNTAIN) open = 1; }
+      for (const [dx, dy] of K.DIRS4) { const x = (i & NM) + dx, y = (i >> NS) + dy; if (K.inb(x, y) && w.fPass(K.idx(x, y))) open = 1; }
       const d = K.dist(u.x, u.y, i & NM, i >> NS) - open * 20;
       if (d < bd) { bd = d; best = i; }
     }
@@ -565,21 +594,118 @@
   // sites are left to their own workers.
   const isBuildJob = (s) => (s.type === 'site' && !K.selfBuilt(s)) || !!s.upg;
   K.needsMason = (s) => !K.selfBuilt(s) && (isBuildJob(s) || s.hp < s.maxHp);
-  // Work squares for builders: walkable tiles directly beside the structure. Each holds one
-  // builder, so this is also how many builders can work on it at once.
+  // Work squares for builders: walkable tiles beside the structure, diagonals included. Each holds
+  // one builder, so (with wallSpots) this is also how many builders can work on it at once.
+  const ring = (s, f) => {
+    for (let y = s.y - 1; y <= s.y + s.h; y++)
+      for (let x = s.x - 1; x <= s.x + s.w; x++) {
+        if (x >= s.x && x < s.x + s.w && y >= s.y && y < s.y + s.h) continue;
+        if (K.inb(x, y)) f(K.idx(x, y));
+      }
+  };
   K.buildSpots = function (w, s) {
     const out = [];
-    const add = (x, y) => { if (K.inb(x, y)) { const i = K.idx(x, y); if (w.fPass(i) && w.sgrid[i] !== s.id) out.push(i); } };
-    for (let x = s.x; x < s.x + s.w; x++) { add(x, s.y - 1); add(x, s.y + s.h); }
-    for (let y = s.y; y < s.y + s.h; y++) { add(s.x - 1, y); add(s.x + s.w, y); }
+    ring(s, (i) => { if (w.fPass(i) && w.sgrid[i] !== s.id) out.push(i); });
     return out;
   };
+  const isBattle = (w, i) => { const o = w.sgrid[i] && w.structs.get(w.sgrid[i]); return !!o && o.type === 'wall' && o.battlement; };
+  // Walk along the wall-walk from battlement `start` to the nearest one a builder can climb onto from
+  // the ground. Returns { climb: ground tile, route: wall tiles from the climbing point to start }.
+  function wallRoute(w, start) {
+    const prev = new Map([[start, -1]]), q = [start];
+    for (let k = 0; k < q.length && k < 400; k++) {
+      const i = q[k], x = i & NM, y = i >> NS;
+      for (const [dx, dy] of K.DIRS4) {
+        if (!K.inb(x + dx, y + dy)) continue;
+        const g = K.idx(x + dx, y + dy);
+        if (!w.fPass(g)) continue;
+        const route = [];
+        for (let j = i; j !== -1; j = prev.get(j)) route.push(j);
+        return { climb: g, route };
+      }
+      for (const [dx, dy] of K.DIRS8) {
+        if (!K.inb(x + dx, y + dy)) continue;
+        const j = K.idx(x + dx, y + dy);
+        if (!prev.has(j) && isBattle(w, j)) { prev.set(j, i); q.push(j); }
+      }
+    }
+    return null;
+  }
+  // Builders may also work standing on a finished battlement beside the job.
+  K.wallSpots = function (w, s) {
+    const out = [];
+    ring(s, (i) => {
+      if (w.sgrid[i] === s.id || !isBattle(w, i) || K.engineHost(w, w.structs.get(w.sgrid[i]))) return;
+      const r = wallRoute(w, i);
+      if (r) out.push({ i, climb: r.climb, route: r.route });
+    });
+    return out;
+  };
+  K.spotCount = (w, s) => K.buildSpots(w, s).length + K.wallSpots(w, s).length;
+
+  // ---- never build in an order that cuts off other work ----
+  const OPEN_DONE = new Set(['gate', 'irongate', 'keepdoor', 'bridge', 'drawbridge', 'farm']);
+  // Where subjects could still walk from the Keep once site `s` is finished (null: nothing changes).
+  function finishRegion(G, s) {
+    const w = G.world;
+    if (s.type !== 'site' || OPEN_DONE.has(s.final) || !w.keep) return null;
+    if (G.finV !== w.version || G.finW !== w) { G.finV = w.version; G.finW = w; G.finC = new Map(); }
+    if (!G.finC.has(s.id)) {
+      const blk = new Set();
+      for (let y = s.y; y < s.y + s.h; y++) for (let x = s.x; x < s.x + s.w; x++) blk.add(K.idx(x, y));
+      G.finC.set(s.id, keepRegion(w, blk, true));
+    }
+    return G.finC.get(s.id);
+  }
+  // Would finishing `s` cut someone off, or leave another job (site, battlements, trench) out of reach?
+  K.strands = function (G, s, jobsOnly) {
+    const w = G.world, home = K.homeRegion(G), R = finishRegion(G, s);
+    if (!R || !home) return false;
+    const lost = (st) => st.some((j) => home[j]) && !st.some((j) => R[j]);
+    for (const o of w.structs.values()) {
+      if (o === s || !(o.type === 'site' || o.upg)) continue;
+      if (lost(K.buildSpots(w, o)) && !K.wallSpots(w, o).some((p) => R[p.climb])) return true;
+    }
+    for (const t of w.plan) if (lost(standsOf(w, t, () => true))) return true;
+    if (jobsOnly) return false;
+    for (const v of G.units) {
+      if (v.team !== 0 || v.dead || v.hidden || v.onWall) continue;
+      const i = tileOf(v);
+      if (home[i] && !R[i] && w.sgrid[i] !== s.id) return true;
+    }
+    return false;
+  };
+  // walk a builder along the wall-walk (u.wpath: battlement tiles)
+  function walkTiles(G, u, dt) {
+    const w = G.world, i = u.wpath[0];
+    if (!isBattle(w, i)) { u.wpath = null; K.stepOffWall(G, u); u.wb = null; u.rep = null; u.spot = null; return; }
+    const tx = (i & NM) + 0.5, ty = (i >> NS) + 0.6, d = K.dist(u.x, u.y, tx, ty), step = K.unitStats(u).speed * 0.8 * dt;
+    u.face = tx > u.x ? 1 : tx < u.x ? -1 : u.face;
+    u.moving = true; u.state = 'walk';
+    if (d <= step) { u.x = tx; u.y = ty; u.wpath.shift(); if (!u.wpath.length) u.moving = false; }
+    else { u.x += ((tx - u.x) / d) * step; u.y += ((ty - u.y) / d) * step; }
+  }
   // placement order of a construction job (sites and battlement upgrades)
   const buildOrd = (s) => (s.type === 'site' ? s.ord : s.upg && s.upg.ord) || s.id;
   function doRepair(G, u, dt) {
     const w = G.world, def = G.phase === 'defense', o = def ? w.computeOutside() : null;
     const valid = (s) => s && w.structs.has(s.id) && K.needsMason(s) && (!o || !o[K.idx(s.x, s.y)] || s.type === 'keep');
-    if (u.rep && (!valid(u.rep) || u.spot == null || !w.fPass(u.spot))) { u.rep = null; u.spot = null; u.path = null; }
+    if (u.rep && (!valid(u.rep) || u.spot == null || (u.wb ? !isBattle(w, u.spot) : !w.fPass(u.spot)))) { u.rep = null; u.spot = null; u.path = null; }
+    // up on the battlements: walk the wall-walk, and climb down again once the job is done
+    if (u.onWall) {
+      if (!isBattle(w, tileOf(u)) || !u.wb) { K.stepOffWall(G, u); u.wb = null; u.wpath = null; return; }
+      if (!u.rep && !u.wbDown) {
+        let k = 0, kd = 1e9;
+        u.wb.route.forEach((j, n) => { const d = K.dist(u.x, u.y, (j & NM) + 0.5, (j >> NS) + 0.6); if (d < kd) { kd = d; k = n; } });
+        u.wbDown = true; u.wpath = u.wb.route.slice(0, k).reverse();
+      }
+      if (u.wpath && u.wpath.length) return walkTiles(G, u, dt);
+      if (u.wbDown) {
+        u.x = (u.wb.climb & NM) + 0.5; u.y = (u.wb.climb >> NS) + 0.5;
+        u.onWall = false; u.wb = null; u.wbDown = false; u.path = null;
+        return;
+      }
+    }
     if (!u.rep) {
       if (!(u.repSearch > G.time)) {
         u.repSearch = G.time + 0.5;
@@ -595,22 +721,60 @@
         }
         builds.sort((a, b) => buildOrd(a) - buildOrd(b));
         repairs.sort((a, b) => (K.dist(u.x, u.y, a.x, a.y) - (1 - a.hp / a.maxHp) * 30) - (K.dist(u.x, u.y, b.x, b.y) - (1 - b.hp / b.maxHp) * 30));
-        for (const s of def ? repairs.concat(builds) : builds.concat(repairs)) {
-          let spot = -1, sd = 1e9;
-          for (const i of K.buildSpots(w, s)) {
-            if (claimed.has(i)) continue;
-            const d = K.dist(u.x, u.y, (i & NM) + 0.5, (i >> NS) + 0.5);
-            if (d < sd) { sd = d; spot = i; }
+        const pick = (s) => {
+          const R = finishRegion(G, s);
+          let best = null, sd = 1e9;
+          for (const strict of [true, false]) {
+            // stand where you won't be shut in once it's finished
+            for (const i of K.buildSpots(w, s)) {
+              if (claimed.has(i) || (strict && R && !R[i])) continue;
+              const d = K.dist(u.x, u.y, (i & NM) + 0.5, (i >> NS) + 0.5);
+              if (d < sd) { sd = d; best = { i }; }
+            }
+            for (const p of K.wallSpots(w, s)) {
+              if (claimed.has(p.i) || (strict && R && !R[p.climb])) continue;
+              const d = K.dist(u.x, u.y, (p.climb & NM) + 0.5, (p.climb >> NS) + 0.5) + p.route.length + 1;
+              if (d < sd) { sd = d; best = p; }
+            }
+            if (best) break;
+            // only work from where you'd be shut in if there is no safe side at all
+            if (R && (K.buildSpots(w, s).some((i) => R[i]) || K.wallSpots(w, s).some((p) => R[p.climb]))) break;
           }
-          if (spot >= 0) { u.rep = s; u.spot = spot; u.path = null; break; }
+          if (!best) return false;
+          u.rep = s; u.spot = best.i; u.wb = best.climb != null ? { climb: best.climb, route: best.route } : null; u.path = null;
+          return true;
+        };
+        const held = [];
+        let free = false;
+        for (const s of def ? repairs.concat(builds) : builds.concat(repairs)) {
+          if (isBuildJob(s) && K.strands(G, s)) { held.push(s); continue; }
+          if (isBuildJob(s)) free = true;
+          if (pick(s)) break;
         }
+        // a job that cuts something off waits until nothing else is left to build
+        if (!u.rep && !free) for (const s of held) if (pick(s)) break;
       }
       if (!u.rep) { if (G.phase === 'defense') return hide(G, u, dt); u.state = 'nowork'; return wander(G, u, dt, w.keep ? w.keep.x + 1 : u.x, w.keep ? w.keep.y + 4 : u.y, 3); }
     }
     const s = u.rep, sp = u.spot;
-    const r = goTo(G, u, dt, (i) => i === sp, (sp & NM) + 0.5, (sp >> NS) + 0.5, 'r' + s.id + ':' + sp);
-    if (r === null) { u.repBad.set(s.id, G.time + 6); u.rep = null; u.spot = null; return; }
-    if (!r) return;
+    if (u.wb && !u.onWall) {
+      // walk to the foot of the wall, then climb onto the wall-walk
+      const cl = u.wb.climb;
+      const r = goTo(G, u, dt, (i) => i === cl, (cl & NM) + 0.5, (cl >> NS) + 0.5, 'c' + s.id + ':' + cl);
+      if (r === null) { u.repBad.set(s.id, G.time + 6); u.rep = null; u.spot = null; u.wb = null; return; }
+      if (!r) return;
+      const r0 = u.wb.route[0];
+      u.onWall = true; u.wbDown = false; u.path = null;
+      u.x = (r0 & NM) + 0.5; u.y = (r0 >> NS) + 0.6;
+      u.wpath = u.wb.route.slice(1);
+      return;
+    }
+    if (u.onWall) { if (u.wpath && u.wpath.length) return walkTiles(G, u, dt); }
+    else {
+      const r = goTo(G, u, dt, (i) => i === sp, (sp & NM) + 0.5, (sp >> NS) + 0.5, 'r' + s.id + ':' + sp);
+      if (r === null) { u.repBad.set(s.id, G.time + 6); u.rep = null; u.spot = null; return; }
+      if (!r) return;
+    }
     u.face = s.x + s.w / 2 > u.x ? 1 : -1;
     u.state = 'work'; u.moving = false;
     u.anim = (u.anim || 0) + dt;
@@ -618,7 +782,27 @@
     if (s.type === 'site') {
       s.prog += dt;
       s.hp = Math.min(s.maxHp, s.hp + s.maxHp * 0.9 * dt / s.time);
-      if (s.prog >= s.time) { K.finishSite(G, s); u.rep = null; u.spot = null; }
+      if (s.prog >= s.time) {
+        // finishing this now would shut something in: leave it for last
+        if (K.strands(G, s, true) && [...w.structs.values()].some((o) => o !== s && isBuildJob(o) && valid(o) && !K.strands(G, o))) {
+          s.prog = s.time; u.repBad.set(s.id, G.time + 4); u.rep = null; u.spot = null;
+          if (!s.heldMsg) { s.heldMsg = true; G.msg('Builders leave a ' + K.SDEF[s.final].name.toLowerCase() + ' unfinished for now — closing it would cut off other work.', 'info'); }
+          return;
+        }
+        // anyone who would be shut in walks out first (the builders wait for them)
+        const R = finishRegion(G, s), home = K.homeRegion(G);
+        if (R && home) {
+          let wait = false;
+          for (const v of G.units) {
+            if (v.team !== 0 || v.dead || v.hidden || v.onWall) continue;
+            const i = tileOf(v);
+            if (home[i] && !R[i]) { v.evac = s.id; wait = true; }
+          }
+          s.holdT = (s.holdT || 0) + dt;
+          if (wait && s.holdT < 25) { s.prog = s.time; return; }
+        }
+        K.finishSite(G, s); u.rep = null; u.spot = null;
+      }
       return;
     }
     if (s.upg) {
@@ -652,7 +836,7 @@
     // prefer battlements facing the enemy entries
     let best = null, bd = 1e9;
     for (const s of w.structs.values()) {
-      if (s.type !== 'wall' || !s.battlement || s.noAuto || G.postTaken.has(s.id)) continue;
+      if (s.type !== 'wall' || !s.battlement || s.noAuto || K.engineHost(w, s) || G.postTaken.has(s.id)) continue;
       let ok = false, inside = false;
       for (const [dx, dy] of K.DIRS4) { const j = K.idx(s.x + dx, s.y + dy); if (K.inb(s.x + dx, s.y + dy) && w.fPass(j)) { ok = true; if (!o[j]) inside = true; } }
       if (!ok) continue;
@@ -682,13 +866,13 @@
     return { order: q, prev };
   }
   function planWallMove(G, u, s) {
-    const w = G.world, st = K.unitStats(u), reach = st.range + 2;
+    const w = G.world, st = K.unitStats(u), reach = K.rangeVs(st.range, K.WALL_LIFT, 0) + 2;
     const { order, prev } = wallWalk(w, s, 80);
     if (order.length < 2) return false;
     let best = -1, bd = 1e9;
     for (let k = 1; k < order.length; k++) {
       const i = order[k], o = w.structs.get(w.sgrid[i]);
-      if (!o || o.noAuto || (G.postTaken.has(o.id) && G.postTaken.get(o.id) !== u.id)) continue;
+      if (!o || o.noAuto || K.engineHost(w, o) || (G.postTaken.has(o.id) && G.postTaken.get(o.id) !== u.id)) continue;
       const foe = K.nearest(G, (i & NM) + 0.5, (i >> NS) + 0.5, reach, 1);
       if (!foe) continue;
       const d = k + K.dist(i & NM, i >> NS, foe.x, foe.y) * 0.3; // BFS order ~ walking distance
@@ -769,7 +953,7 @@
   }
   function shootNearest(G, u, dt, bonus) {
     const st = K.unitStats(u);
-    const t = K.nearest(G, u.x, u.y, st.range + bonus, 1);
+    const t = K.nearestRanged(G, u.x, u.y, st.range + bonus, K.unitH(G, u), 1);
     if (!t) return false;
     u.face = t.x > u.x ? 1 : -1;
     if (u.cd <= 0) {
@@ -836,18 +1020,19 @@
     const archer = u.job === 'archer';
     const near = (v) => Math.hypot(v.x - ox, v.y - oy) < 6;
     // targets: siege engines at the spot, then anyone at the spot, then anyone already in reach
-    let t = u.foe && !u.foe.dead && !u.foe.hidden && !u.foe.retreat && (near(u.foe) || Math.hypot(u.foe.x - u.x, u.foe.y - u.y) < st.range + 0.5) ? u.foe : null;
+    const myR = (v) => (archer ? K.rangeVs(st.range, K.unitH(G, u), K.unitH(G, v)) : st.range);
+    let t = u.foe && !u.foe.dead && !u.foe.hidden && !u.foe.retreat && (near(u.foe) || Math.hypot(u.foe.x - u.x, u.foe.y - u.y) < myR(u.foe) + 0.5) ? u.foe : null;
     if (!t || u.reFoe <= G.time) {
       u.reFoe = G.time + 0.8;
       const reach = archer ? st.range : 2.5;
-      t = K.nearest(G, ox, oy, 6, 1, (v) => !!K.UDEF[v.type].siege) || K.nearest(G, ox, oy, 6, 1) || K.nearest(G, u.x, u.y, reach, 1, (v) => archer || K.meleeOk(G, u, v));
+      t = K.nearest(G, ox, oy, 6, 1, (v) => !!K.UDEF[v.type].siege) || K.nearest(G, ox, oy, 6, 1) || (archer ? K.nearestRanged(G, u.x, u.y, reach, K.unitH(G, u), 1) : K.nearest(G, u.x, u.y, reach, 1, (v) => K.meleeOk(G, u, v)));
       if (t !== u.foe) u.path = null;
       u.foe = t;
     }
     if (t) {
       const d = Math.hypot(t.x - u.x, t.y - u.y);
       if (archer) {
-        if (d <= st.range) {
+        if (d <= myR(t)) {
           u.moving = false; u.face = t.x > u.x ? 1 : -1;
           if (u.cd <= 0) {
             u.cd = st.cd * (0.9 + Math.random() * 0.2); u.atkAnim = 0.25;
@@ -870,9 +1055,77 @@
     } else wander(G, u, dt, ox, oy, 1.2);
   }
 
+  // A subject shut off from the Keep (walled in, cut off by water, standing in a structure) and with no
+  // way out finds the cheapest way home anyway: climbing over structures, swimming, or scrambling over rock.
+  function planEscape(G, u) {
+    const w = G.world, home = K.homeRegion(G), k = w.keep;
+    if (!home || !k) return null;
+    const cost = (j) => {
+      const sid = w.sgrid[j];
+      if (sid === k.id) return 0;
+      if (w.fPass(j)) return w.fCost(j);
+      if (sid) return 6;
+      const t = w.terrain[j];
+      return t === T.MOUNTAIN ? 14 : K.isWater(t) ? 4 : 3;
+    };
+    const s = tileOf(u), g = new Map([[s, 0]]), from = new Map([[s, -1]]), done = new Set(), heap = new K.Heap();
+    heap.push(0, s);
+    let n = 0, end = -1;
+    while (heap.size && n++ < 40000) {
+      const i = heap.pop();
+      if (done.has(i)) continue;
+      done.add(i);
+      if (home[i]) { end = i; break; }
+      const x = i & NM, y = i >> NS;
+      for (const [dx, dy, len] of K.DIRS8) {
+        if (!K.inb(x + dx, y + dy)) continue;
+        const j = K.idx(x + dx, y + dy), c = cost(j);
+        if (!c) continue;
+        const ng = g.get(i) + c * len;
+        if (!g.has(j) || ng < g.get(j)) { g.set(j, ng); from.set(j, i); heap.push(ng, j); }
+      }
+    }
+    if (end < 0) return null;
+    const path = [];
+    for (let i = end; i !== s && i >= 0; i = from.get(i)) path.push(i);
+    return path.reverse();
+  }
+  function escape(G, u, dt) {
+    const w = G.world, i = u.escape[0];
+    const tx = (i & NM) + 0.5, ty = (i >> NS) + 0.5, d = K.dist(u.x, u.y, tx, ty);
+    const step = (K.unitStats(u).speed * dt) / (w.fPass(i) ? w.fCost(i) : 2);
+    u.moving = true; u.state = 'walk';
+    if (Math.abs(tx - u.x) > 0.05) u.face = tx > u.x ? 1 : -1;
+    if (d <= step) { u.x = tx; u.y = ty; u.escape.shift(); if (!u.escape.length) { u.escape = null; u.path = null; u.moving = false; } }
+    else { u.x += ((tx - u.x) / d) * step; u.y += ((ty - u.y) / d) * step; }
+  }
   function updateFriendly(G, u, dt) {
     const w = G.world;
     const danger = G.phase === 'defense' || G.recall;
+    if (u.escape) return escape(G, u, dt);
+    if (u.evac != null) {
+      // step out of an enclosure that is about to be closed
+      const es = w.structs.get(u.evac), R = es && es.type === 'site' && finishRegion(G, es);
+      if (!R || R[tileOf(u)] || u.hidden || u.onWall) u.evac = null;
+      else {
+        const r = goTo(G, u, dt, (i) => !!R[i], es.x + 0.5, es.y + 0.5, 'evac' + es.id);
+        if (r === null || r) { u.evac = null; u.path = null; }
+        else return;
+      }
+    }
+    if (!u.hidden && !u.onWall && !(u.trapT > G.time)) {
+      u.trapT = G.time + 1 + Math.random();
+      const home = K.homeRegion(G);
+      if (home && !home[tileOf(u)]) {
+        const p = planEscape(G, u);
+        if (p && p.length) {
+          const how = p.some((j) => w.sgrid[j] && !w.fPass(j)) ? 'climbs over the works' : p.some((j) => K.isWater(w.terrain[j]) && !w.fPass(j)) ? 'swims for it' : 'scrambles over the rocks';
+          if (!(G.escMsgT > G.time)) { G.escMsgT = G.time + 8; G.msg('A subject cut off from the castle ' + how + ' to get home.', 'info'); }
+          u.escape = p; u.path = null; u.wb = null; u.wpath = null;
+          return escape(G, u, dt);
+        }
+      }
+    }
     if (u.kind === 'king') {
       const st = K.unitStats(u);
       const t = K.nearest(G, u.x, u.y, st.range, 1, (v) => K.meleeOk(G, u, v));

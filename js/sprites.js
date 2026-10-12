@@ -761,8 +761,9 @@
     return P.c;
   }
   // 2-wide gatehouse in an east-west wall: twin towers flanking double doors.
-  function gate(open) {
-    const P = mk(32, 26);
+  const gateCols = (iron) => iron ? ['#5a6070', '#3a3f4b', '#23262e', '#1c1e24', '#b8c0cc'] : ['#7a5530', '#5a3c1e', '#3a2416', '#3d3d45', GOLD];
+  function gate(open, iron) {
+    const P = mk(32, 26), [DW, DP, DS, DB, DR] = gateCols(iron);
     bricks(P, 0, 0, 7, 26, '#9a9486', '#6c675e');
     bricks(P, 25, 0, 7, 26, '#9a9486', '#6c675e');
     for (const x of [0, 25]) { P.r(x, 0, 7, 3, '#b9b3a6'); for (let k = 0; k < 7; k += 3) P.r(x + k, 0, 2, 1, '#6c675e'); }
@@ -772,15 +773,15 @@
     P.r(9, 8, 14, 1, '#6c675e'); P.r(8, 9, 1, 17, '#6c675e'); P.r(23, 9, 1, 17, '#6c675e');
     if (open) {
       P.r(9, 9, 14, 17, '#2a2026');
-      P.r(9, 9, 3, 17, '#7a5530'); P.r(20, 9, 3, 17, '#7a5530');
+      P.r(9, 9, 3, 17, DW); P.r(20, 9, 3, 17, DW);
       P.r(10, 10, 12, 1, '#555a66'); // raised portcullis teeth
       for (let x = 10; x < 22; x += 2) P.p(x, 11, '#555a66');
     } else {
-      P.r(9, 9, 14, 17, '#7a5530');
-      for (let x = 9; x < 23; x += 2) P.r(x, 9, 1, 17, '#5a3c1e');
-      P.r(15, 9, 2, 17, '#3a2416');
-      P.r(9, 13, 14, 1, '#3d3d45'); P.r(9, 21, 14, 1, '#3d3d45');
-      P.p(13, 17, GOLD); P.p(18, 17, GOLD);
+      P.r(9, 9, 14, 17, DW);
+      for (let x = 9; x < 23; x += 2) P.r(x, 9, 1, 17, DP);
+      P.r(15, 9, 2, 17, DS);
+      P.r(9, 13, 14, 1, DB); P.r(9, 21, 14, 1, DB);
+      P.p(13, 17, DR); P.p(18, 17, DR);
     }
     // little banners on the towers
     P.r(3, 5, 2, 4, '#3d63d8'); P.r(27, 5, 2, 4, '#3d63d8');
@@ -788,8 +789,8 @@
     return P.c;
   }
   // 2-tall gatehouse in a north-south wall, seen from above.
-  function gateV(open) {
-    const P = mk(16, 36);
+  function gateV(open, iron) {
+    const P = mk(16, 36), [DW, DP, DS, DB, DR] = gateCols(iron);
     bricks(P, 0, 0, 16, 7, '#9a9486', '#6c675e');
     bricks(P, 0, 29, 16, 7, '#9a9486', '#6c675e');
     P.r(0, 0, 16, 2, '#b9b3a6'); P.r(0, 29, 16, 2, '#b9b3a6');
@@ -797,13 +798,13 @@
     P.r(3, 7, 10, 22, '#6c675e');
     if (open) {
       P.r(4, 8, 8, 20, '#2a2026');
-      P.r(4, 8, 8, 3, '#7a5530'); P.r(4, 25, 8, 3, '#7a5530');
+      P.r(4, 8, 8, 3, DW); P.r(4, 25, 8, 3, DW);
     } else {
-      P.r(4, 8, 8, 20, '#7a5530');
-      for (let y = 8; y < 28; y += 2) P.r(4, y, 8, 1, '#5a3c1e');
-      P.r(4, 17, 8, 2, '#3a2416');
-      P.r(6, 8, 1, 20, '#3d3d45'); P.r(9, 8, 1, 20, '#3d3d45');
-      P.p(7, 14, GOLD); P.p(7, 21, GOLD);
+      P.r(4, 8, 8, 20, DW);
+      for (let y = 8; y < 28; y += 2) P.r(4, y, 8, 1, DP);
+      P.r(4, 17, 8, 2, DS);
+      P.r(6, 8, 1, 20, DB); P.r(9, 8, 1, 20, DB);
+      P.p(7, 14, DR); P.p(7, 21, DR);
     }
     P.r(6, 2, 4, 3, '#3d63d8');
     outline(P);
@@ -969,6 +970,7 @@
     S.stables = stables();
     S.troll = [troll(0), troll(1), troll(2)];
     S.gate = [[gate(false), gate(true)], [gateV(false), gateV(true)]];
+    S.irongate = [[gate(false, true), gate(true, true)], [gateV(false, true), gateV(true, true)]];
     S.drawbridge = { down: [drawbridge(false, false), drawbridge(false, true)], up: [drawbridge(true, false), drawbridge(true, true)] };
     S.bridge = [bridgeSpr(false), bridgeSpr(true)];
     S.wall = [];

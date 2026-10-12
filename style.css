@@ -142,3 +142,9 @@ button:disabled { opacity: 0.45; cursor: default; }
 .saved-list .item .nm small.cust { color: #f4cb4e; }
 #menu .row.opts { font-size: 11px; color: var(--dim); }
 .res.full .n { color: #f4cb4e; }
+#keepconf { position: fixed; inset: 0; background: #0006; display: flex; align-items: center; justify-content: center; z-index: 25; }
+#keepconf.hidden { display: none; }
+#keepconf .card { width: 360px; max-width: 94vw; padding: 14px 20px 16px; text-align: center; border-color: var(--edge2); }
+#keepconf h2 { margin: 2px 0 10px; color: var(--gold); font-family: Georgia, serif; letter-spacing: 2px; font-size: 20px; }
+#keepconf .row { display: flex; gap: 10px; justify-content: center; margin-top: 12px; }
+#keepconf button { padding: 6px 18px; font-size: 15px; }

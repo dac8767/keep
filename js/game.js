@@ -242,7 +242,8 @@
     const st = K.unitStats(u);
     u.maxHp = st.hp;
     u.hp = Math.max(1, Math.round(st.hp * ratio));
-    u.state = null; u.path = null; u.onWall = false; u.wallPath = null;
+    if (u.onWall) stepOffWall(G, u);
+    u.state = null; u.path = null; u.onWall = false; u.wallPath = null; u.wb = null; u.wpath = null;
   };
   function releaseJob(G, u) {
     if (u.work) { u.work.workers.delete(u.id); u.work = null; }
@@ -520,7 +521,7 @@
   };
 
   // ---------------- building ----------------
-  function walkableType(type) { return type === 'gate' || type === 'farm' || type === 'bridge' || type === 'drawbridge'; }
+  function walkableType(type) { return K.isGate(type) || type === 'farm' || type === 'bridge' || type === 'drawbridge'; }
 
   // tiles: [{x,y}] (drag builds pass many). Returns number placed.
   // Castle works may be raised during a siege; farms, quarries, mines and bloomeries may not.
@@ -560,7 +561,7 @@
       }
       if (!Object.entries(d.cost).every(([k, v]) => budget[k] >= v)) { reason = 'Not enough resources (' + K.costText(d.cost) + ')'; break; }
       for (const k in d.cost) budget[k] -= d.cost[k];
-      valid.push(Object.assign({ replace: r.replace, kind: r.kind, w: d.w, h: d.h }, t));
+      valid.push(Object.assign({ replace: r.replace, kind: r.kind, mount: r.mount, w: d.w, h: d.h }, t));
     }
     if (!valid.length) { if (reason) G.msg(reason, 'warn'); return 0; }
 
@@ -572,7 +573,7 @@
       for (const i of w.floodSet(extra)) ov.set(i, crossing(w, i));
     } else if (type !== 'battlement' && type !== 'charge') {
       for (const v of valid)
-        for (let dy = 0; dy < v.h; dy++) for (let dx = 0; dx < v.w; dx++) ov.set(K.idx(v.x + dx, v.y + dy), walkableType(type));
+        if (!v.mount) for (let dy = 0; dy < v.h; dy++) for (let dx = 0; dx < v.w; dx++) ov.set(K.idx(v.x + dx, v.y + dy), walkableType(type));
     }
     if (ov.size && !w.hasExit(ov)) {
       G.msg('There must always be a way for subjects to leave the castle! Leave a gap, gate or drawbridge.', 'warn');
@@ -594,6 +595,14 @@
         if (instant) { s.battlement = true; s.maxHp += 250; s.hp += 250; }
         else if (s.type === 'site') { s.battle = true; s.time += K.BUILD_SECS.battlement; }
         else s.upg = { prog: 0, time: K.BUILD_SECS.battlement, ord: (G.buildSeq = (G.buildSeq || 0) + 1) };
+        w.touch(v.x, v.y); w.bump();
+      } else if (v.mount) {
+        // the anchor (top-left) wall carries the engine; the others are reserved for it
+        const host = w.structAt(v.x, v.y);
+        host.engParts = [];
+        for (let dy = 0; dy < v.h; dy++) for (let dx = 0; dx < v.w; dx++) { const o = w.structAt(v.x + dx, v.y + dy); if (o !== host) { o.engPart = host.id; host.engParts.push(o.id); } }
+        if (instant) host.engine = { type, reload: 0, fired: 0 };
+        else { host.upg = { prog: 0, time: K.BUILD_SECS[type] || 20, ord: (G.buildSeq = (G.buildSeq || 0) + 1), engine: type }; sites++; }
         w.touch(v.x, v.y); w.bump();
       } else {
         let battle = false;
@@ -624,7 +633,7 @@
       w.bump();
       if (!K.jobCount(G).dig) G.msg(valid.length + ' tile' + (valid.length > 1 ? 's' : '') + (type === 'fill' ? ' marked for filling' : ' of trench marked') + '. Assign Ditchers to do the work.', 'info');
     }
-    if (type === 'gate') K.fixAllDrawbridges(G);
+    if (K.isGate(type)) K.fixAllDrawbridges(G);
     K.unstick(G);
     return valid.length;
   };
@@ -645,7 +654,7 @@
       K.fixDrawbridge(G, ns);
       if (!K.isWater(w.terrain[i]) && w.terrain[i] !== T.TRENCH) { w.plan.delete(i); w.fillPlan.delete(i); w.setTerrain(i, T.TRENCH); dug = true; }
     }
-    if (type === 'gate') K.fixAllDrawbridges(G);
+    if (K.isGate(type)) K.fixAllDrawbridges(G);
     return dug;
   }
 
@@ -662,6 +671,12 @@
     return ns;
   };
   K.finishUpgrade = function (G, s) {
+    if (s.upg && s.upg.engine) {
+      s.engine = { type: s.upg.engine, reload: 0, fired: 0 }; s.upg = null;
+      G.msg(K.SDEF[s.engine.type].name + ' hauled up onto the battlements.', 'good');
+      G.world.touch(s.x, s.y); G.world.bump();
+      return;
+    }
     s.upg = null; s.battlement = true; s.maxHp += 250; s.hp += 250;
     G.world.touch(s.x, s.y); G.world.bump();
   };
@@ -673,6 +688,64 @@
     const t = s.type === 'site' ? s.final : s.type;
     return t === 'bridge' || t === 'drawbridge';
   }
+
+  // Cancel a queued construction (site or battlement upgrade): everything is refunded.
+  // Take a mounted (or half-built) siege engine off its walls; refund = true pays back a queued one.
+  K.unmountEngine = function (G, s, refund) {
+    const w = G.world, type = s.engine ? s.engine.type : s.upg && s.upg.engine;
+    if (!type) return;
+    if (refund && !s.engine) K.refund(G, K.SDEF[type].cost, 1);
+    for (const id of s.engParts || []) { const o = w.structs.get(id); if (o && o.engPart === s.id) o.engPart = null; }
+    s.engParts = null; s.engine = null;
+    if (s.upg && s.upg.engine) s.upg = null;
+    for (const u of G.units) if (u.rep === s) { u.rep = null; u.spot = null; }
+    w.touch(s.x, s.y); w.bump();
+  };
+  K.cancelSite = function (G, s) {
+    const w = G.world;
+    if (!s || !w.structs.has(s.id)) return false;
+    if (s.type === 'site') {
+      K.refund(G, K.SDEF[s.final].cost, 1);
+      if (s.battle) K.refund(G, K.SDEF.battlement.cost, 1);
+      w.remove(s); K.unstick(G);
+    } else if (s.upg && s.upg.engine) K.unmountEngine(G, s, true);
+    else if (s.upg) { K.refund(G, K.SDEF.battlement.cost, 1); s.upg = null; w.bump(); }
+    else return false;
+    G.msg('Construction cancelled — fully refunded.', 'info');
+    return true;
+  };
+  // Turn a gate (built or queued) a quarter turn, sliding it to the nearest free footprint that
+  // overlaps where it stood. It never cuts into other structures.
+  K.rotateGate = function (G, s) {
+    const w = G.world;
+    if (!s || !w.structs.has(s.id)) return false;
+    const gt = s.type === 'site' ? s.final : s.type, rot = s.rot ? 0 : 1, d = K.dims(gt, rot), old = { x: s.x, y: s.y, w: s.w, h: s.h, rot: s.rot };
+    const cands = [];
+    for (let y = s.y - d.h + 1; y < s.y + s.h; y++)
+      for (let x = s.x - d.w + 1; x < s.x + s.w; x++) cands.push([K.dist(x + d.w / 2, y + d.h / 2, s.x + s.w / 2, s.y + s.h / 2), x, y]);
+    cands.sort((a, b) => a[0] - b[0]);
+    w.remove(s);
+    const put = (o) => {
+      Object.assign(s, o);
+      w.structs.set(s.id, s);
+      for (let dy = 0; dy < s.h; dy++) for (let dx = 0; dx < s.w; dx++) { w.sgrid[K.idx(s.x + dx, s.y + dy)] = s.id; w.touch(s.x + dx, s.y + dy); }
+      w.bump();
+    };
+    for (const [, x, y] of cands) {
+      const r = w.canPlace(gt, x, y, G, rot);
+      if (!r.ok || r.replace) continue;
+      const ks = G.kingSpot;
+      if (ks && ks.x >= x && ks.x < x + d.w && ks.y >= y && ks.y < y + d.h) continue;
+      put({ x, y, w: d.w, h: d.h, rot });
+      if (!w.hasExit()) { w.remove(s); continue; }
+      K.unstick(G);
+      for (const u of G.units) if (u.rep === s) { u.rep = null; u.spot = null; u.path = null; }
+      return true;
+    }
+    put(old);
+    G.msg('No room to turn the gate here.', 'warn');
+    return false;
+  };
 
   function demolish(G, tiles) {
     const w = G.world;
@@ -690,6 +763,16 @@
       const s = w.structAt(t.x, t.y);
       if (!s || done.has(s.id)) continue;
       if (s.type === 'keep' || s.type === 'keepdoor') { G.msg('The Keep cannot be demolished.', 'warn'); continue; }
+      // a siege engine on the walls comes down first; the walls stay
+      const eh = K.engineHost(w, s);
+      if (eh) {
+        done.add(s.id); if (done.has(eh.id)) continue; done.add(eh.id);
+        const et = eh.engine ? eh.engine.type : eh.upg.engine;
+        K.refund(G, K.SDEF[et].cost, eh.engine ? 0.5 : 1);
+        K.unmountEngine(G, eh, false); plans++;
+        G.msg(K.SDEF[et].name + ' taken down from the walls.', 'info');
+        continue;
+      }
       // only removing a crossing (bridge/drawbridge over water) can cut off the way out
       if (s.type === 'bridge' || s.type === 'drawbridge') {
         const ov = new Map();
@@ -745,7 +828,7 @@
     for (const u of G.units) if (u.post === s.id) { u.post = null; if (u.onWall) { u.onWall = false; u.hp -= 10; } }
     G.postTaken.delete(s.id);
     w.remove(s);
-    if (s.type === 'gate' || s.type === 'drawbridge') K.fixAllDrawbridges(G);
+    if (K.isGate(s.type) || s.type === 'drawbridge') K.fixAllDrawbridges(G);
     // workers left without a workplace become unassigned (those who worked here go first)
     const st = s.type === 'site' && K.SELF_BUILD[s.final] ? s.final : s.type;
     for (const j of K.JOBS) {
@@ -792,7 +875,7 @@
     const cx = (b.x0 + b.x1 + 1) / 2, cy = (b.y0 + b.y1 + 1) / 2;
     let tx = null, ty = null, bd = 1e9;
     for (const s of w.structs.values()) {
-      if (s.type !== 'gate') continue;
+      if (!K.isGate(s.type)) continue;
       const d = K.dist(s.x + s.w / 2, s.y + s.h / 2, cx, cy);
       if (d < bd) { bd = d; tx = s.x + s.w / 2; ty = s.y + s.h / 2; }
     }
@@ -845,15 +928,19 @@
       if (u.team || u.dead || u.hidden || u.onWall) continue;
       const i = K.idx(Math.floor(u.x), Math.floor(u.y));
       if (w.fPass(i)) continue;
-      for (let r = 1; r < 6; r++) {
-        let found = false;
-        for (let dy = -r; dy <= r && !found; dy++)
-          for (let dx = -r; dx <= r && !found; dx++) {
-            const x = Math.floor(u.x) + dx, y = Math.floor(u.y) + dy;
-            if (K.inb(x, y) && w.fPass(K.idx(x, y))) { u.x = x + 0.5; u.y = y + 0.5; found = true; }
-          }
-        if (found) break;
-      }
+      // nearest free tile, preferring one still connected to the Keep
+      const home = K.homeRegion && K.homeRegion(G);
+      let best = null;
+      for (let pass = 0; pass < 2 && !best; pass++)
+        for (let r = 1; r < 6 && !best; r++)
+          for (let dy = -r; dy <= r && !best; dy++)
+            for (let dx = -r; dx <= r && !best; dx++) {
+              const x = Math.floor(u.x) + dx, y = Math.floor(u.y) + dy;
+              if (!K.inb(x, y)) continue;
+              const j = K.idx(x, y);
+              if (w.fPass(j) && (pass || !home || home[j])) best = [x, y];
+            }
+      if (best) { u.x = best[0] + 0.5; u.y = best[1] + 0.5; }
       u.path = null; u.state = null;
     }
   };
@@ -897,7 +984,16 @@
         const x = cx + dx, y = cy + dy;
         if (!K.inb(x, y) || dx * dx + dy * dy > RT.blastR * RT.blastR) continue;
         const j = K.idx(x, y);
-        if (w.terrain[j] !== T.MOUNTAIN || w.sgrid[j]) continue;
+        if ((w.terrain[j] !== T.MOUNTAIN && w.terrain[j] !== T.ROCK) || w.sgrid[j]) continue;
+        // a rock patch just breaks up where it lies
+        if (w.terrain[j] === T.ROCK) {
+          w.setTerrain(j, T.DIRT);
+          for (const [ax, ay] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (K.inb(x + ax, y + ay)) w.touch(x + ax, y + ay);
+          const rc = w.charges.get(j);
+          if (rc && rc.kind === 'blast' && rc.state === 'planned') { w.charges.delete(j); K.refund(G, K.SDEF.charge.cost, 1); }
+          n++;
+          continue;
+        }
         // settle the cleared ground at the height of the land around it
         let e = 0;
         for (const [ax, ay] of K.DIRS8 || [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
@@ -1120,7 +1216,7 @@
     w.bump();
     // archers posted on battlements stay there through the build phase
     const keepsPost = (u) => !u.dead && u.job === 'archer' && u.post != null && w.structs.has(u.post);
-    for (const u of G.units) if (u.team === 0) { if (!keepsPost(u)) u.onWall = false; u.wallPath = null; u.state = null; u.path = null; }
+    for (const u of G.units) if (u.team === 0) { if (!keepsPost(u)) stepOffWall(G, u); u.wallPath = null; u.wb = null; u.wpath = null; u.state = null; u.path = null; }
     G.postTaken.clear();
     for (const u of G.units) { if (u.team === 0 && keepsPost(u)) G.postTaken.set(u.post, u.id); else { u.post = null; u.manualPost = false; } }
     chooseEntries(G);

@@ -9,7 +9,7 @@
   const sizeHooks = [];
   K.N = N;
   K.SURVEY_N = 1024;
-  K.PLAY_N = 128;
+  K.PLAY_N = 256;
   K.onSize = (f) => { sizeHooks.push(f); f(); };
   K.setSize = (n) => { N = K.N = n; for (const f of sizeHooks) f(); };
   K.TS = 16;

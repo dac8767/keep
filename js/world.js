@@ -50,6 +50,19 @@
     // ---------- placement ----------
     canPlace(type, x, y, game, rot) {
       const d = Object.assign({}, K.SDEF[type], K.dims(type, rot));
+      // catapults and trebuchets can be hauled up onto finished battlements
+      if ((type === 'catapult' || type === 'trebuchet') && this.structAt(x, y)) {
+        const s0 = this.structAt(x, y);
+        if (s0.type !== 'wall' && !(s0.type === 'site' && s0.final === 'wall')) return { ok: false, reason: 'Something is already built here' };
+        for (let dy = 0; dy < d.h; dy++)
+          for (let dx = 0; dx < d.w; dx++) {
+            const s = K.inb(x + dx, y + dy) ? this.structAt(x + dx, y + dy) : null;
+            if (!s || s.type !== 'wall') return { ok: false, reason: d.w > 1 ? 'A trebuchet needs a 2×2 block of walls with battlements' : 'Finish the wall first' };
+            if (!s.battlement) return { ok: false, reason: 'Siege engines on walls need finished battlements' };
+            if (s.upg || s.engine || s.engPart) return { ok: false, reason: 'This battlement is already in use' };
+          }
+        return { ok: true, mount: true };
+      }
       if (type === 'battlement') {
         const s = this.structAt(x, y);
         const wallSite = s && s.type === 'site' && s.final === 'wall';
@@ -74,7 +87,7 @@
         if (t === T.MINE) return { ok: false, reason: 'Blasting would ruin the mine' };
         if (K.isWater(t) || t === T.TRENCH) return { ok: false, reason: 'The powder would get wet' };
         if (this.plan.has(i)) return { ok: false, reason: 'Marked for digging' };
-        if (t === T.MOUNTAIN) {
+        if (t === T.MOUNTAIN || t === T.ROCK) {
           if (this.nearKeep(x, y, 2)) return { ok: false, reason: 'Too close to the keep' };
           return { ok: true, kind: 'blast' };
         }
@@ -103,7 +116,7 @@
           if (this.sgrid[i]) {
             const s = this.structs.get(this.sgrid[i]);
             // gates can be cut into existing wall sections
-            if (type === 'gate' && (s.type === 'wall' || (s.type === 'site' && s.final === 'wall'))) { if (!replace.includes(s)) replace.push(s); continue; }
+            if (K.isGate(type) && (s.type === 'wall' || (s.type === 'site' && s.final === 'wall'))) { if (!replace.includes(s)) replace.push(s); continue; }
             return { ok: false, reason: 'Something is already built here' };
           }
           if (t === T.MOUNTAIN) return { ok: false, reason: 'Cannot build on mountains' };
@@ -219,7 +232,7 @@
         let type = s.type;
         if (type === 'site') { if (!lowered) return !K.isWater(t); type = s.final; }
         switch (type) {
-          case 'gate': case 'keepdoor': case 'bridge': case 'farm': return true;
+          case 'gate': case 'irongate': case 'keepdoor': case 'bridge': case 'farm': return true;
           case 'drawbridge': return lowered || !s.raised;
           default: return false;
         }
@@ -370,7 +383,8 @@
             if (this.tower[i] || (this.ladder[i] && cls !== 'horse')) return 3;
             return cls === 'ladder' ? 10 : 260;
           case 'gate': return 28;
-          case 'drawbridge': return s.raised ? 34 : 1;
+          case 'irongate': return 60;
+          case 'drawbridge': return s.raised ? 400 : 1;
           case 'bridge': return 1;
           case 'farm': return 1.4;
           case 'quarry': case 'mine': case 'bloomery': case 'lumbermill': return 2.5;
@@ -393,7 +407,7 @@
         switch (s.type) {
           case 'wall': return this.tower[i] || (this.ladder[i] && cls !== 'horse') ? 0 : 2;
           case 'bridge': case 'farm': case 'quarry': case 'mine': case 'bloomery': case 'lumbermill': return 0;
-          case 'drawbridge': return s.raised ? 1 : 0;
+          case 'drawbridge': return s.raised ? 2 : 0;
           case 'keep': return 2;
           default: return 1;
         }

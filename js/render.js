@@ -208,6 +208,7 @@
       const ft = s.type === 'site' ? s.final : s.type;
       if (ft === 'farm' || ft === 'bridge' || ft === 'drawbridge' || ft === 'keep' || ft === 'keepdoor') ground.push(s);
       else items.push({ y: s.y + s.h, s });
+      if (s.type === 'wall' && s.engine) items.push({ y: s.y + K.SDEF[s.engine.type].h + 0.002, eng: s });
     }
     for (const s of ground) drawStruct(ctx, s, G, time);
 
@@ -221,6 +222,7 @@
     items.sort((a, b) => a.y - b.y);
     for (const it of items) {
       if (it.s) drawStruct(ctx, it.s, G, time);
+      else if (it.eng) drawEngine(ctx, it.eng);
       else if (it.u) drawUnit(ctx, it.u, G, time);
       else if (it.b) drawBeast(ctx, it.b, time);
       else drawMonster(ctx, it.m, time);
@@ -244,7 +246,7 @@
   function wallMask(w, x, y) {
     const c = (dx, dy) => {
       const s = w.structAt(x + dx, y + dy);
-      return s && (s.type === 'wall' || s.type === 'gate');
+      return s && (s.type === 'wall' || K.isGate(s.type));
     };
     return (c(0, -1) ? 1 : 0) | (c(1, 0) ? 2 : 0) | (c(0, 1) ? 4 : 0) | (c(-1, 0) ? 8 : 0);
   }
@@ -280,10 +282,10 @@
   // Walls that touch only at a corner are joined by a diagonal run of masonry (drawn under the tile itself;
   // the lower tile is drawn later and covers its own end).
   function wallDiagonals(ctx, w, s, bx, by) {
-    const kind = (x, y) => { const o = w.structAt(x, y); return o && (o.type === 'wall' || o.type === 'gate') ? o : null; };
+    const kind = (x, y) => { const o = w.structAt(x, y); return o && (o.type === 'wall' || K.isGate(o.type)) ? o : null; };
     for (const [sx, sy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
       const o = kind(s.x + sx, s.y + sy);
-      if (!o || (sy < 0 && o.type !== 'gate') || kind(s.x + sx, s.y) || kind(s.x, s.y + sy)) continue;
+      if (!o || (sy < 0 && !K.isGate(o.type)) || kind(s.x + sx, s.y) || kind(s.x, s.y + sy)) continue;
       const bat = s.battlement && o.battlement;
       const step = (sz, oy, col) => {
         ctx.fillStyle = col;
@@ -312,6 +314,15 @@
     bar(ctx, bx + bw / 2 - 6, by - 5, 12, f, '#8ad0ff');
   }
 
+  // a catapult or trebuchet standing on top of the battlements
+  function drawEngine(ctx, s) {
+    const e = s.engine, d = K.SDEF[e.type], S = K.SPR;
+    const img = S[e.type][e.fired > 0 ? 1 : 0];
+    const bx = s.x * TS + (d.w * TS - img.width) / 2, by = (s.y + d.h) * TS - img.height - 6;
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(s.x * TS + 2, (s.y + d.h) * TS - 9, d.w * TS - 4, 3);
+    ctx.drawImage(img, Math.round(bx), Math.round(by));
+  }
   function drawStruct(ctx, s, G, time) {
     const S = K.SPR, w = R.world;
     if (s.type === 'site') return drawSite(ctx, s, G, time);
@@ -335,6 +346,7 @@
       case 'metalstore': img = S.metalstore; break;
       case 'stables': img = S.stables; break;
       case 'gate': img = S.gate[s.rot ? 1 : 0][G.phase === 'defense' ? 0 : 1]; break;
+      case 'irongate': img = S.irongate[s.rot ? 1 : 0][G.phase === 'defense' ? 0 : 1]; break;
       case 'catapult': img = S.catapult[s.fired > 0 ? 1 : 0]; break;
       case 'trebuchet': img = S.trebuchet[s.fired > 0 ? 1 : 0]; break;
       case 'bridge': case 'drawbridge': {
@@ -812,9 +824,10 @@
         ctx.lineWidth = 1;
         ctx.strokeRect(gh.x * TS + 0.5, gh.y * TS + 0.5, gw * TS - 1, ghh * TS - 1);
         if (d.range && gh === ui.ghost[0]) {
+          const onWall = K.inb(gh.x, gh.y) && w.structAt(gh.x, gh.y) && w.structAt(gh.x, gh.y).type === 'wall';
           ctx.strokeStyle = 'rgba(255,255,255,0.5)';
           ctx.setLineDash([3, 3]);
-          ctx.beginPath(); ctx.arc((gh.x + d.w / 2) * TS, (gh.y + d.h / 2) * TS, d.range * TS, 0, Math.PI * 2); ctx.stroke();
+          ctx.beginPath(); ctx.arc((gh.x + d.w / 2) * TS, (gh.y + d.h / 2) * TS, (onWall ? K.rangeVs(d.range, K.WALL_LIFT, 0) : d.range) * TS, 0, Math.PI * 2); ctx.stroke();
           if (d.minRange) minRing((gh.x + d.w / 2) * TS, (gh.y + d.h / 2) * TS, d.minRange);
           ctx.setLineDash([]);
         }
@@ -861,12 +874,14 @@
       ctx.strokeStyle = '#f4cb4e';
       ctx.lineWidth = 1;
       ctx.strokeRect(s.x * TS - 0.5, s.y * TS - 0.5, s.w * TS + 1, s.h * TS + 1);
-      const d = K.SDEF[s.type];
+      const eh = K.engineHost(w, s), es = eh || s;
+      const d = eh ? K.SDEF[eh.engine ? eh.engine.type : eh.upg.engine] : K.SDEF[s.type];
       if (d.range) {
+        const ex = (es.x + d.w / 2) * TS, ey = (es.y + d.h / 2) * TS;
         ctx.strokeStyle = 'rgba(244,203,78,0.5)';
         ctx.setLineDash([3, 3]);
-        ctx.beginPath(); ctx.arc((s.x + s.w / 2) * TS, (s.y + s.h / 2) * TS, d.range * TS, 0, Math.PI * 2); ctx.stroke();
-        if (d.minRange) minRing((s.x + s.w / 2) * TS, (s.y + s.h / 2) * TS, d.minRange);
+        ctx.beginPath(); ctx.arc(ex, ey, (eh ? K.rangeVs(d.range, K.WALL_LIFT, 0) : d.range) * TS, 0, Math.PI * 2); ctx.stroke();
+        if (d.minRange) minRing(ex, ey, d.minRange);
         ctx.setLineDash([]);
       }
     }

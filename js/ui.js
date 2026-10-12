@@ -28,7 +28,7 @@
   };
 
   // ---------- build menu ----------
-  const CATS = { resources: 'Resources', terrain: 'Terrain', village: 'Village', storage: 'Storage', defense: 'Defenses', units: 'Combat' };
+  const CATS = { resources: 'Resources', terrain: 'Terrain', village: 'Village', storage: 'Storage', defense: 'Defenses' };
   function savedTab() { try { const t = localStorage.getItem('keep.tab'); return CATS[t] ? t : 'village'; } catch (e) { return 'village'; } }
   function showTab(c) {
     for (const b of document.querySelectorAll('.btab')) { const on = b.dataset.cat === c; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); }
@@ -43,7 +43,7 @@
       for (const id in K.SDEF) {
         const d = K.SDEF[id];
         if (d.cat !== c) continue;
-        items += `<div class="bitem" data-type="${id}"><span>${d.name}</span><span class="key">${d.key.toUpperCase()}</span><span class="cost">${costHtml(d.cost)}</span></div>`;
+        items += `<div class="bitem" data-type="${id}"><span>${d.name}</span><span class="key">${(d.key || '').toUpperCase()}</span><span class="cost">${costHtml(d.cost)}</span></div>`;
       }
       tabs += `<button class="btab" role="tab" data-cat="${c}">${CATS[c]}</button>`;
       panels += `<div class="bpanel" role="tabpanel" data-cat="${c}">${items}</div>`;
@@ -69,10 +69,28 @@
     const tm = $('toolmode');
     if (t) {
       const d = K.SDEF[t];
-      tm.innerHTML = `${t === 'demolish' ? 'Demolishing' : 'Building: ' + d.name}<span class="note">${d.drag ? 'Click or drag on the map' : 'Click on the map'} · Right-click or Esc to cancel</span>`;
+      tm.innerHTML = `${t === 'demolish' ? 'Demolishing' : 'Building: ' + d.name}${d.rotates ? ' <button id="btn-toolrot" title="Turn it the other way (V)">⟳ Rotate</button>' : ''}<span class="note">${d.drag ? 'Click or drag on the map' : 'Click on the map'} · Right-click or Esc to cancel</span>`;
+      const br = $('btn-toolrot');
+      if (br) br.onclick = () => rotateTool();
     }
     tm.classList.toggle('hidden', !t);
     refreshInfo();
+  }
+
+  // Keep placement waits for the player to confirm the site.
+  function keepConfirm(yes) {
+    const G = UI.G, p = UI.pendingKeep;
+    $('keepconf').classList.add('hidden');
+    UI.pendingKeep = null;
+    if (!yes || !p || G.phase !== 'place') return;
+    if (K.placeKeep(G, p.x, p.y)) { UI.shaping = false; G.ui.ghost = null; tip(null); UI.centerOn(G.kingSpot.x, G.kingSpot.y); }
+  }
+  UI.keepConfirm = keepConfirm;
+
+  function rotateTool() {
+    UI.rot = UI.rot ? 0 : 1;
+    if (UI.tool && UI.mouse) updateGhost();
+    if (K.isGate(UI.tool)) UI.G.msg('Gate turned ' + (UI.rot ? 'across' : 'along') + ' the wall line.', 'info');
   }
 
   // ---------- jobs table ----------
@@ -190,9 +208,14 @@
       el.classList.remove('hidden');
       const h = `<h3>${fd.name}${s.battle ? ' + battlements' : ''} <small>(under construction)</small></h3>
         <div class="hpbar"><div style="width:${pct}%;background:#8ad0ff"></div></div>
-        <div class="note">${pct}% built · ${nm ? nm + (self ? '' : '/' + K.buildSpots(G.world, s).length) + ' ' + (nm > 1 ? jn : jn.replace(/s$/, '')) + ' working' : (K.jobCount(G)[job.id] && !self ? 'waiting for a builder' : 'assign ' + job.name + ' to build it')}</div>
-        <p>${fd.desc}</p><p class="note">Demolish to cancel (full refund).</p>`;
-      if (el.dataset.h !== h) { el.innerHTML = h; el.dataset.h = h; }
+        <div class="note">${pct}% built · ${nm ? nm + (self ? '' : '/' + K.spotCount(G.world, s)) + ' ' + (nm > 1 ? jn : jn.replace(/s$/, '')) + ' working' : (K.jobCount(G)[job.id] && !self ? 'waiting for a builder' : 'assign ' + job.name + ' to build it')}</div>
+        <p>${fd.desc}</p><p><button id="btn-cancel">Cancel build (full refund)</button>${K.isGate(s.final) ? ' <button id="btn-grot">⟳ Rotate</button>' : ''}</p><p class="note">Or press Delete.</p>`;
+      if (el.dataset.h !== h) {
+        el.innerHTML = h; el.dataset.h = h;
+        $('btn-cancel').onclick = () => { K.cancelSite(G, s); G.ui.selected = null; refreshInfo(); };
+        const gr = $('btn-grot');
+        if (gr) gr.onclick = () => { K.rotateGate(G, s); refreshInfo(); };
+      }
       return;
     }
     const d = K.SDEF[s.type];
@@ -211,7 +234,13 @@
       const n = [...G.world.structs.values()].filter((x) => x.type === 'drawbridge').length;
       if (n > 1) h += `<p><button id="btn-bridges">${[...G.world.structs.values()].some((x) => x.type === 'drawbridge' && !x.raised) ? 'Raise' : 'Lower'} all ${n}</button></p>`;
     }
-    if (s.type === 'wall' && s.battlement) {
+    const eh = K.engineHost(G.world, s);
+    if (eh) {
+      const et = eh.engine ? eh.engine.type : eh.upg.engine, ed = K.SDEF[et];
+      h += `<div><b>${ed.name}</b> mounted on these battlements${eh.engine ? '' : ' — being hauled up'}</div>
+        <div class="note">Range ${K.rangeVs(ed.range, K.WALL_LIFT, 0).toFixed(1)} from the walls (${ed.range} on the ground). Demolish removes the engine, not the wall.</div>`;
+      if (!eh.engine) h += `<p><button id="btn-cancel">Cancel ${ed.name.toLowerCase()} (full refund)</button></p>`;
+    } else if (s.type === 'wall' && s.battlement) {
       const a = K.archerOn(G, s);
       if (a) h += `<div>Manned by an archer${a.manualPost ? ' (assigned by you)' : ''}${a.onWall ? '' : ' — on the way'}</div><p><button id="btn-unassign">Unassign archer</button></p>`;
       else {
@@ -232,6 +261,8 @@
       }
       h += '</table><p class="note">mounted / horses given</p>';
     }
+    if (s.upg && !s.upg.engine) h += `<p><button id="btn-cancel">Cancel battlements (full refund)</button></p>`;
+    if (K.isGate(s.type)) h += `<p><button id="btn-grot">⟳ Rotate gate</button> <span class="note">${s.rot ? 'north–south' : 'east–west'}</span></p>`;
     if (s.type !== 'keep' && s.type !== 'keepdoor' && (G.phase === 'build' || G.phase === 'defense')) h += `<p><button id="btn-demo">Demolish (50% refund)</button></p>`;
     if (el.dataset.h !== h) {
       el.innerHTML = h; el.dataset.h = h;
@@ -239,6 +270,10 @@
       if (b) b.onclick = () => { K.tryBuild(G, 'demolish', [{ x: s.x, y: s.y }]); G.ui.selected = null; refreshInfo(); };
       const bb = $('btn-bridge');
       if (bb) bb.onclick = () => { K.setDrawbridge(G, s, !s.raised); refreshInfo(); };
+      const bc = $('btn-cancel');
+      if (bc) bc.onclick = () => { K.cancelSite(G, K.engineHost(G.world, s) || s); refreshInfo(); };
+      const gr = $('btn-grot');
+      if (gr) gr.onclick = () => { K.rotateGate(G, s); refreshInfo(); };
       const br = $('btn-rotate');
       if (br) br.onclick = () => { K.rotateDrawbridge(G, s); refreshInfo(); };
       const bas = $('btn-assign');
@@ -357,6 +392,9 @@
         const left = d.mode === 'raise' ? K.SHAPE_BUDGET - G.shaped.size : tiles.length;
         G.ui.shapeArea = { x0: Math.min(d.x, m.x), y0: Math.min(d.y, m.y), x1: Math.max(d.x, m.x), y1: Math.max(d.y, m.y), mode: d.mode, ok: tiles.slice(0, left), over: tiles.slice(left) };
       } else G.ui.shapeArea = null;
+    } else if (G.phase === 'place' && UI.pendingKeep) {
+      G.ui.shapeHover = null;
+      G.ui.ghost = [{ type: 'keep', x: UI.pendingKeep.x, y: UI.pendingKeep.y, ok: true }];
     } else if (G.phase === 'place') {
       G.ui.shapeHover = null;
       if (UI.mouse) { const x = UI.mouse.tile.x - 1, y = UI.mouse.tile.y - 1; G.ui.ghost = [{ type: 'keep', x, y, ok: K.keepSiteOk(G, x, y).ok }]; }
@@ -465,8 +503,8 @@
       // match the wall line under the cursor, otherwise use the manual rotation (V)
       const w = UI.G.world, isW = (x, y) => { const s = w.structAt(x, y); return s && s.type === 'wall'; };
       const vert = isW(t.x, t.y - 1) || isW(t.x, t.y + 1), horz = isW(t.x - 1, t.y) || isW(t.x + 1, t.y);
-      // on a diagonal wall the V key picks which way the gate lies
-      rot = vert && !horz ? 1 : horz && !vert ? 0 : UI.rot || 0;
+      // it lines up with the wall under the cursor; V (or the Rotate button) turns it the other way
+      rot = (vert && !horz ? 1 : 0) ^ (UI.rot || 0);
     }
     const d = K.dims(type, rot);
     return { x: t.x - ((d.w - 1) >> 1), y: t.y - ((d.h - 1) >> 1), rot };
@@ -517,7 +555,13 @@
         return;
       }
       if (G.phase === 'place') {
-        if (K.placeKeep(G, t.x - 1, t.y - 1)) { G.ui.ghost = null; tip(null); UI.centerOn(G.kingSpot.x, G.kingSpot.y); }
+        if (UI.pendingKeep) return;
+        const r = K.keepSiteOk(G, t.x - 1, t.y - 1);
+        if (!r.ok) { G.msg(r.reason + '.', 'warn'); return; }
+        UI.pendingKeep = { x: t.x - 1, y: t.y - 1 };
+        tip(null);
+        $('keepconf').classList.remove('hidden');
+        $('keepconf-ok').focus();
         return;
       }
       if (UI.tool) {
@@ -626,14 +670,16 @@
       if (!UI.G || e.target.tagName === 'INPUT') return;
       const k = e.key.toLowerCase();
       UI.keys[k] = true;
-      if (k === 'escape') { setTool(null); UI.shaping = false; UI.G.ui.selected = null; selectUnit(null); refreshInfo(); }
+      if (UI.pendingKeep && (k === 'escape' || k === 'enter')) { e.preventDefault(); keepConfirm(k === 'enter'); }
+      else if ((k === 'delete' || k === 'backspace') && UI.G.ui.selected && UI.G.ui.selected.type === 'site') { e.preventDefault(); K.cancelSite(UI.G, UI.G.ui.selected); UI.G.ui.selected = null; refreshInfo(); }
+      else if (k === 'escape') { setTool(null); UI.shaping = false; UI.G.ui.selected = null; selectUnit(null); refreshInfo(); }
       else if (k === ' ') { e.preventDefault(); setSpeed(UI.speed === 0 ? UI.prevSpeed || 1 : 0); }
       else if (k === '1') setSpeed(1);
       else if (k === '2') setSpeed(2);
       else if (k === '3') setSpeed(4);
       else if (k === 'i') toggleInterior();
       else if (k === 'home' || k === 'k') { const s = UI.G.kingSpot || UI.G.world.start; UI.centerOn(s.x, s.y); }
-      else if (k === 'v') { UI.rot = UI.rot ? 0 : 1; if (UI.tool && UI.mouse) updateGhost(); }
+      else if (k === 'v') rotateTool();
       else if (k === '=' || k === '+') { e.preventDefault(); zoomBy(1.3, innerWidth / 2, innerHeight / 2); }
       else if (k === '-' || k === '_') { e.preventDefault(); zoomBy(1 / 1.3, innerWidth / 2, innerHeight / 2); }
       else if (!e.metaKey && !e.ctrlKey && !'wasd'.includes(k)) {
@@ -661,6 +707,8 @@
       });
     }
     $('btn-shape').onclick = () => { UI.shaping = !UI.shaping; refreshTop(); };
+    $('keepconf-ok').onclick = () => keepConfirm(true);
+    $('keepconf-no').onclick = () => keepConfirm(false);
     $('btn-god').onclick = () => { K.setGod(UI.G, !UI.G.god); refreshTop(); };
     for (const b of document.querySelectorAll('[data-speed]')) b.onclick = () => setSpeed(+b.dataset.speed);
     const mm = $('minimap');

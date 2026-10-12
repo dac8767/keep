@@ -163,7 +163,7 @@
   function ensureRiver(st, start) {
     let n = 0;
     for (let i = 0; i < N * N; i++) if (st.terrain[i] === T.RIVER) n++;
-    if (n >= 30) return;
+    if (n >= 30 * (N * N) / 16384) return;
     const avoid = (i) => K.dist(i & NM, i >> NS, start.x, start.y) < 10;
     for (const [minLen, anySource] of [[40, false], [30, true], [16, true]])
       if (carveRivers(st, { count: 1, minLen, anySource, avoid })) return;
