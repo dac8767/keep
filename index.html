@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Keep</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="topbar" class="panel">
+    <button id="btn-menu" title="Menu (Esc closes)">☰ Menu</button>
+    <div id="resources"></div>
+    <div id="phase"></div>
+    <div id="controls">
+      <button id="btn-shape" class="hidden" title="Turn water or mountain tiles into land before founding your Keep (click again to undo)">Shape land</button>
+      <button id="btn-begin" title="Skip the rest of the build phase">Begin assault</button>
+      <button id="btn-bridges" class="hidden" title="Raise or lower every drawbridge">Raise bridges</button>
+      <button id="btn-interior" title="Highlight the enclosed castle interior (I)">Interior</button>
+      <button id="btn-god" title="God mode: invincible and unlimited resources (testing)">God</button>
+      <button data-speed="0" title="Pause (Space)">❚❚</button>
+      <button data-speed="1" class="on" title="Normal speed (1)">▶</button>
+      <button data-speed="2" title="Fast (2)">▶▶</button>
+      <button data-speed="4" title="Very fast (3)">▶▶▶</button>
+    </div>
+  </div>
+
+  <div id="buildmenu" class="panel"></div>
+
+  <div id="side">
+    <div id="minimap-wrap" class="panel"><canvas id="minimap" width="256" height="256"></canvas></div>
+    <div id="jobs" class="panel"></div>
+    <div id="info" class="panel hidden"></div>
+  </div>
+
+  <div id="toolmode" class="panel hidden"></div>
+  <div id="tooltip" class="hidden"></div>
+
+  <div id="menu" class="hidden">
+    <div class="card panel">
+      <div id="menu-main">
+        <h2>Paused</h2>
+        <button id="menu-resume">Resume</button>
+        <button id="menu-settings">Settings</button>
+        <button id="menu-new">New map</button>
+      </div>
+      <div id="menu-set" class="hidden">
+        <h2>Settings</h2>
+        <div class="row">Map seed: <b id="menu-seed"></b> <button id="menu-copy" title="Copy the seed">Copy</button></div>
+        <div class="row opts" id="menu-opts"></div>
+        <div class="row"><input id="menu-name" placeholder="Name (optional)" maxlength="40"> <button id="menu-save">Save Seed</button></div>
+        <h3>Saved maps</h3>
+        <div id="menu-saved"></div>
+        <button id="menu-back">Back</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="overlay">
+    <div class="card">
+      <h1>KEEP</h1>
+      <p class="sub">Raise a castle. Protect your sovereign. Survive ten sieges.</p>
+      <div class="how">
+        <p><b>Found your realm</b> — survey the map and click to place your Keep.</p>
+        <p><b>Build phase (5:00)</b> — gather lumber, stone, ore and food; build farms, quarries, mines, a bloomery, houses and medical tents; wall in your King.</p>
+        <p><b>Defense phase</b> — armies march in formation from the red arrows at the map edge, with siege trains, rams and cavalry reserves. Subjects shelter in the Keep; you can still raise walls, gates and engines and train soldiers.</p>
+        <p><b>Beasts</b> — giant spiders and cave trolls attack anyone near their lairs. Wall one in and it may guard your castle… if it doesn't eat your builders first.</p>
+        <p><b>Moats</b> — dig trenches that touch a lake or river and they flood. Connect a lake with a tentacle monster and it may swim in to defend you.</p>
+        <p><b>You lose</b> if your King or Queen is slain or captured, all subjects are gone, or every structure falls.</p>
+        <p class="keys">WASD / arrows / right-drag: pan &nbsp;·&nbsp; wheel / pinch / + −: zoom &nbsp;·&nbsp; V: rotate gate &nbsp;·&nbsp; click-drag: build lines / box-select soldiers &nbsp;·&nbsp; right-click: send selected soldiers to attack &nbsp;·&nbsp; Esc: cancel &nbsp;·&nbsp; Space: pause &nbsp;·&nbsp; 1-3: speed</p>
+      </div>
+      <p class="ruler">Your ruler:
+        <label><input type="radio" name="ruler" value="king" checked><img data-icon="king" alt=""> King</label>
+        <label><input type="radio" name="ruler" value="queen"><img data-icon="queen" alt=""> Queen</label></p>
+      <button id="btn-start">Begin your reign</button>
+      <p class="seed">Map seed: <input id="seed" size="10"> <button id="btn-reroll">New map</button> <button id="btn-custom" title="Adjust water, mountains, resources, beasts and enemy difficulty">Customize map ▸</button></p>
+      <div id="custom" class="hidden">
+        <div id="custom-sliders"></div>
+        <button id="custom-reset">Reset to standard</button>
+      </div>
+      <div id="saved-start"></div>
+    </div>
+  </div>
+
+  <script src="js/core.js"></script>
+  <script src="js/defs.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/world.js"></script>
+  <script src="js/sprites.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/units.js"></script>
+  <script src="js/enemies.js"></script>
+  <script src="js/army.js"></script>
+  <script src="js/beasts.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/menu.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
