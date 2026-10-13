@@ -783,10 +783,11 @@
       // a siege engine on the walls comes down first; the walls stay
       const eh = K.engineHost(w, s);
       if (eh) {
-        done.add(s.id); if (done.has(eh.id)) continue; done.add(eh.id);
+        if (done.has(eh.id)) continue;
+        done.add(eh.id);
         const et = eh.engine ? eh.engine.type : eh.upg.engine;
         K.refund(G, K.SDEF[et].cost, eh.engine ? 0.5 : 1);
-        K.unmountEngine(G, eh, false); plans++;
+        K.unmountEngine(G, eh, false);
         G.msg(K.SDEF[et].name + ' taken down from the walls.', 'info');
         continue;
       }

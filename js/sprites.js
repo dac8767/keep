@@ -306,8 +306,9 @@
     const P = mk(20, 18);
     P.r(2, 9, 16, 4, '#6e4a26'); P.r(2, 9, 16, 1, '#9a6d3b');
     P.r(4, 5, 2, 5, '#5a3c1e'); P.r(14, 5, 2, 5, '#5a3c1e'); P.r(4, 5, 12, 1, '#7a5530');
-    if (f === 0) { P.line(6, 9, 16, 6, '#8a5e30'); P.r(15, 4, 3, 3, '#4a3018'); P.p(16, 4, '#888'); }
-    else { P.line(9, 9, 6, 1, '#8a5e30'); P.r(4, 0, 3, 2, '#4a3018'); }
+    // faces right: loaded bucket at the back (left), the arm throws over to the right
+    if (f === 0) { P.line(13, 9, 3, 6, '#8a5e30'); P.r(2, 4, 3, 3, '#4a3018'); P.p(3, 4, '#888'); }
+    else { P.line(10, 9, 13, 1, '#8a5e30'); P.r(13, 0, 3, 2, '#4a3018'); }
     P.r(8, 8, 4, 2, TEAM[team].a);
     wheel(P, 4, 14, 0); wheel(P, 15, 14, 0);
     outline(P);
@@ -917,8 +918,9 @@
     const P = mk(16, 18);
     P.r(1, 9, 14, 5, '#6e4a26'); P.r(1, 9, 14, 1, '#9a6d3b');
     P.r(3, 5, 2, 5, '#5a3c1e'); P.r(11, 5, 2, 5, '#5a3c1e'); P.r(3, 5, 10, 1, '#7a5530');
-    if (!f) { P.line(4, 11, 13, 7, '#8a5e30'); P.r(12, 5, 3, 3, '#4a3018'); P.p(13, 5, '#999'); }
-    else { P.line(8, 11, 4, 1, '#8a5e30'); P.r(2, 0, 3, 2, '#4a3018'); }
+    // faces right: loaded bucket at the back (left), the arm throws over to the right
+    if (!f) { P.line(11, 11, 2, 7, '#8a5e30'); P.r(1, 5, 3, 3, '#4a3018'); P.p(2, 5, '#999'); }
+    else { P.line(7, 11, 11, 1, '#8a5e30'); P.r(11, 0, 3, 2, '#4a3018'); }
     P.r(6, 12, 4, 2, TEAM[0].a);
     P.circ(3, 14, 2, '#3a2512'); P.circ(12, 14, 2, '#3a2512');
     outline(P);

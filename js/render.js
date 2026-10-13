@@ -324,7 +324,7 @@
     const bx = s.x * TS + (d.w * TS - img.width) / 2, by = (s.y + d.h) * TS - img.height - 6;
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
     ctx.fillRect(s.x * TS + 2, (s.y + d.h) * TS - 9, d.w * TS - 4, 3);
-    if (e.type === 'trebuchet' && e.face < 0) {
+    if ((e.type === 'trebuchet' || e.type === 'catapult') && e.face < 0) {
       ctx.save(); ctx.translate(Math.round(bx) * 2 + img.width, 0); ctx.scale(-1, 1);
       ctx.drawImage(img, Math.round(bx), Math.round(by)); ctx.restore();
     } else ctx.drawImage(img, Math.round(bx), Math.round(by));
@@ -390,7 +390,7 @@
     }
     if (!img) return;
     const dx = bx + (bw - img.width) / 2, dy = by + bh - img.height;
-    if (s.type === 'trebuchet' && s.face < 0) {
+    if ((s.type === 'trebuchet' || s.type === 'catapult') && s.face < 0) {
       // turned to face whatever it last fired at
       ctx.save(); ctx.translate(Math.round(dx) * 2 + img.width, 0); ctx.scale(-1, 1);
       ctx.drawImage(img, Math.round(dx), Math.round(dy)); ctx.restore();
@@ -781,7 +781,7 @@
   }
   function drawOverlays(ctx, G, time, x0, y0, x1, y1) {
     const w = R.world;
-    // unclaimed mine sites: glowing outline + bobbing pickaxe so they stand out
+    // unclaimed mine sites: glowing outline so they stand out
     for (const [mx, my] of w.mines || []) {
       if (mx + 2 < x0 || mx > x1 || my + 2 < y0 || my > y1) continue;
       if (w.sgrid[K.idx(mx, my)]) continue;
@@ -791,12 +791,6 @@
       ctx.setLineDash([3, 2]);
       ctx.strokeRect(mx * TS + 0.5, my * TS + 0.5, 2 * TS - 1, 2 * TS - 1);
       ctx.setLineDash([]);
-      const bx = mx * TS + TS - 5, by = my * TS - 6 + Math.round(Math.sin(time * 2.5 + my) * 2);
-      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(bx - 2, by - 2, 14, 14);
-      ctx.fillStyle = '#ffd25a'; ctx.fillRect(bx - 1, by - 1, 12, 12);
-      ctx.fillStyle = '#3a2a18'; ctx.fillRect(bx, by, 10, 10);
-      ctx.fillStyle = '#b08850'; for (let k = 0; k < 6; k++) ctx.fillRect(bx + 2 + k, by + 7 - k, 1, 1);
-      ctx.fillStyle = '#d0d6e0'; ctx.fillRect(bx + 4, by + 1, 5, 1); ctx.fillRect(bx + 8, by + 2, 1, 3); ctx.fillRect(bx + 3, by + 2, 1, 1);
     }
     // beasts' territory rings
     for (const b of G.beasts || []) {
@@ -1013,13 +1007,23 @@
         ctx.beginPath(); ctx.arc((ui.orderMark.x + 0.5) * TS, (ui.orderMark.y + 0.5) * TS, 4 + a * 14, 0, Math.PI * 2); ctx.stroke();
       }
     }
+    if (ui && ui.multi && ui.multi.length > 1) {
+      ctx.strokeStyle = '#f4cb4e'; ctx.lineWidth = 1;
+      ctx.fillStyle = 'rgba(244,203,78,0.18)';
+      for (const s of ui.multi) {
+        if (!w.structs.has(s.id)) continue;
+        ctx.fillRect(s.x * TS, s.y * TS, s.w * TS, s.h * TS);
+        ctx.strokeRect(s.x * TS - 0.5, s.y * TS - 0.5, s.w * TS + 1, s.h * TS + 1);
+      }
+    }
     if (ui && ui.selected && w.structs.has(ui.selected.id)) {
       const s = ui.selected;
-      ctx.strokeStyle = '#f4cb4e';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(s.x * TS - 0.5, s.y * TS - 0.5, s.w * TS + 1, s.h * TS + 1);
       const eh = K.engineHost(w, s), es = eh || s;
       const d = eh ? K.SDEF[eh.engine ? eh.engine.type : eh.upg.engine] : K.SDEF[s.type];
+      ctx.strokeStyle = '#f4cb4e';
+      ctx.lineWidth = 1;
+      if (eh) ctx.strokeRect(eh.x * TS - 0.5, eh.y * TS - 0.5, d.w * TS + 1, d.h * TS + 1);
+      else ctx.strokeRect(s.x * TS - 0.5, s.y * TS - 0.5, s.w * TS + 1, s.h * TS + 1);
       if (d.range) {
         const ex = (es.x + d.w / 2) * TS, ey = (es.y + d.h / 2) * TS;
         ctx.strokeStyle = 'rgba(244,203,78,0.5)';

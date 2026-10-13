@@ -26,7 +26,8 @@
     return { kind, sex, x, y, hx, hy, hp: d.hp, maxHp: d.hp, cd: 0, tgt: null, face: 1, atk: 0, wait: 0, gx: null, gy: null, hurtT: 0, phase, moving: false, breedT: 0 };
   };
   const flies = (b) => !!K.BEASTS[b.kind].fly;
-  K.beastCanBreed = (G, b) => !b.dead && !b.young && (b.noBreedUntil ?? -1) < G.round;
+  K.beastCanBreed = (G, b) => !b.dead && !b.young && (b.noBreedUntil ?? -1) < G.round && !(b.restUntil > G.time);
+  K.BEAST_REST = 120;  // both parents rest this long after a young is born
 
   // Choose lairs for a new map (spiders in forests, trolls beside mountains).
   K.placeBeasts = function (G) {
@@ -185,6 +186,8 @@
       for (const [dx, dy] of K.DIRS8) if (flies(f) || bPassG(w, Math.floor(f.x + dx * 0.6), Math.floor(f.y + dy * 0.6))) { c.x = f.x + dx * 0.6; c.y = f.y + dy * 0.6; break; }
       c.young = true; c.growT = K.BEAST_GROW; c.maxHp = c.hp = Math.round(d.hp * K.BEAST_YOUNG);
       born.push(c);
+      f.restUntil = mate.restUntil = G.time + K.BEAST_REST;
+      f.mate = mate.mate = null;
       G.msg(`A young ${d.name.toLowerCase()} has ${f.kind === 'spider' ? 'hatched' : 'been born'} — it will be fully grown in ${Math.round(K.BEAST_GROW / 60)} minutes.`, 'warn');
     }
     G.beasts.push(...born);

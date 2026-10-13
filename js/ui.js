@@ -216,6 +216,27 @@
       $('btn-desel').onclick = () => { selectUnit(null); refreshInfo(); };
     }
   }
+  // Several structures selected: a summary with cancel / demolish for all of them.
+  function refreshMultiInfo(G, list, el) {
+    const counts = new Map();
+    let pend = 0, built = 0;
+    for (const o of list) {
+      const nm = K.SDEF[o.type === 'site' ? o.final : o.type].name + (o.type === 'site' ? ' (site)' : '');
+      counts.set(nm, (counts.get(nm) || 0) + 1);
+      if (o.type === 'site' || o.upg) pend++; else built++;
+    }
+    const canDemo = G.phase === 'build' || G.phase === 'defense';
+    const h = `<h3>${list.length} structures selected</h3>
+      <div class="note">${[...counts].map(([n, c]) => c + ' × ' + n).join('<br>')}</div>
+      <p>${pend ? `<button id="btn-mcancel">Cancel ${pend} build${pend > 1 ? 's' : ''} (full refund)</button> ` : ''}${built && canDemo ? `<button id="btn-mdemo">Demolish ${built} (50% refund)</button>` : ''}</p>
+      <p class="note">Delete cancels unfinished work and demolishes the rest. Shift-click to add or remove one; Esc to clear.</p>`;
+    el.classList.remove('hidden');
+    if (el.dataset.h === h) return;
+    el.innerHTML = h; el.dataset.h = h;
+    const c = $('btn-mcancel'), d = $('btn-mdemo');
+    if (c) c.onclick = () => UI.removeStructs(G, UI.structSel(G), 'cancel');
+    if (d) d.onclick = () => UI.removeStructs(G, UI.structSel(G), 'demolish');
+  }
   function refreshInfo() {
     const G = UI.G, s = G.ui.selected, el = $('info');
     if (G.ui.sel && G.ui.sel.length) {
@@ -223,6 +244,10 @@
       if (live.length !== G.ui.sel.length) selectUnits(live);
       if (live.length) return refreshUnitInfo(G, live, el);
     }
+    const multi = (G.ui.multi || []).filter((o) => G.world.structs.has(o.id));
+    if (multi.length !== (G.ui.multi || []).length) G.ui.multi = multi;
+    if (multi.length > 1) return refreshMultiInfo(G, multi, el);
+    if (multi.length === 1) G.ui.selected = multi[0];
     if (!s || !G.world.structs.has(s.id)) { G.ui.selected = null; el.classList.add('hidden'); return; }
     if (s.type === 'site') {
       const fd = K.SDEF[s.final], pct = Math.floor((100 * s.prog) / s.time);
@@ -235,7 +260,7 @@
         <p>${fd.desc}</p><p><button id="btn-cancel">Cancel build (full refund)</button>${K.isGate(s.final) ? ' <button id="btn-grot">⟳ Rotate</button>' : ''}</p><p class="note">Or press Delete.</p>`;
       if (el.dataset.h !== h) {
         el.innerHTML = h; el.dataset.h = h;
-        $('btn-cancel').onclick = () => { K.cancelSite(G, s); G.ui.selected = null; refreshInfo(); };
+        $('btn-cancel').onclick = () => UI.removeStructs(G, [s], 'cancel');
         const gr = $('btn-grot');
         if (gr) gr.onclick = () => { K.rotateGate(G, s); refreshInfo(); };
       }
@@ -280,11 +305,11 @@
     }
     if (s.upg && !s.upg.engine) h += `<p><button id="btn-cancel">Cancel battlements (full refund)</button></p>`;
     if (K.isGate(s.type)) h += `<p><button id="btn-grot">⟳ Rotate gate</button> <span class="note">${s.rot ? 'north–south' : 'east–west'}</span></p>`;
-    if (s.type !== 'keep' && s.type !== 'keepdoor' && (G.phase === 'build' || G.phase === 'defense')) h += `<p><button id="btn-demo">Demolish (50% refund)</button></p>`;
+    if (s.type !== 'keep' && s.type !== 'keepdoor' && (G.phase === 'build' || G.phase === 'defense')) h += `<p><button id="btn-demo">Demolish (50% refund)</button></p><p class="note">Delete key: ${s.upg ? 'cancels the work in progress' : 'demolishes'}. Shift-click or drag a box to select several.</p>`;
     if (el.dataset.h !== h) {
       el.innerHTML = h; el.dataset.h = h;
       const b = $('btn-demo');
-      if (b) b.onclick = () => { K.tryBuild(G, 'demolish', [{ x: s.x, y: s.y }]); G.ui.selected = null; refreshInfo(); };
+      if (b) b.onclick = () => UI.removeStructs(G, [s], 'demolish');
       const bb = $('btn-bridge');
       if (bb) bb.onclick = () => { K.setDrawbridge(G, s, !s.raised); refreshInfo(); };
       const bc = $('btn-cancel');
@@ -588,14 +613,16 @@
         else { K.tryBuild(G, UI.tool, [anchor(UI.tool, t)]); if (!e.shiftKey && UI.tool !== 'demolish' && !K.canAfford(G, K.SDEF[UI.tool].cost)) setTool(null); }
       } else {
         // box-select starts here; a click without dragging is handled on mouseup
-        UI.box = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY, shift: e.shiftKey, moved: false };
+        UI.box = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY, shift: e.shiftKey, structs: e.ctrlKey || e.metaKey, moved: false };
       }
     });
     function clickSelect(G, e) {
       const c = K.Render.cam, fx = (c.x + e.clientX / c.zoom) / TS, fy = (c.y + e.clientY / c.zoom) / TS;
       const t = screenToTile(e.clientX, e.clientY);
-      const s = G.world.structAt(t.x, t.y);
+      // a catapult/trebuchet on the battlements is drawn taller than its footprint: hit-test its sprite first
+      const s = engineAt(G, fx, fy) || K.engineHost(G.world, G.world.structAt(t.x, t.y)) || G.world.structAt(t.x, t.y);
       // clicking a wall (even with an archer on it) selects the wall; assign/unassign from its panel
+      if (!e.shiftKey) G.ui.multi = [];
       if (s && s.type === 'wall' && !e.shiftKey) { selectUnit(null); G.ui.selected = s; refreshInfo(); return; }
       // pick a soldier under the cursor (sprites stand above their tile)
       let best = null, bd = 0.9;
@@ -609,15 +636,72 @@
         else selectUnits([best], e.shiftKey);
         G.ui.selected = null;
       } else if (!e.shiftKey) { selectUnit(null); G.ui.selected = s; }
+      else if (s && pickable(s)) {
+        // shift-click adds a structure to the selection, or takes it back out
+        selectUnit(null);
+        const m = structSel(G);
+        G.ui.multi = m.includes(s) ? m.filter((o) => o !== s) : m.concat([s]);
+        G.ui.selected = G.ui.multi.length === 1 ? G.ui.multi[0] : null;
+      }
       refreshInfo();
     }
+    function engineAt(G, fx, fy) {
+      const px = fx * TS, py = fy * TS;
+      for (const o of G.world.structs.values()) {
+        if (o.type !== 'wall' || !(o.engine || (o.upg && o.upg.engine))) continue;
+        const et = o.engine ? o.engine.type : o.upg.engine, d = K.SDEF[et], img = K.SPR[et][0];
+        const x0 = Math.min(o.x * TS, o.x * TS + (d.w * TS - img.width) / 2), x1 = Math.max((o.x + d.w) * TS, o.x * TS + (d.w * TS + img.width) / 2);
+        const y0 = Math.min(o.y * TS, (o.y + d.h) * TS - img.height - 6), y1 = (o.y + d.h) * TS;
+        if (px >= x0 && px < x1 && py >= y0 && py < y1) return o;
+      }
+      return null;
+    }
+    const pickable = (s) => s.type !== 'keep' && s.type !== 'keepdoor';
+    // the structures currently selected (one or many)
+    function structSel(G) {
+      const w = G.world, m = (G.ui.multi || []).filter((o) => w.structs.has(o.id));
+      if (m.length) return m;
+      return G.ui.selected && w.structs.has(G.ui.selected.id) ? [G.ui.selected] : [];
+    }
+    UI.structSel = structSel;
+    // Delete / the panel buttons: cancel what is still being built, demolish what is finished
+    function removeStructs(G, list, mode) {
+      const w = G.world, demo = [], say = G.msg;
+      let cancelled = 0, gone = 0;
+      G.msg = (t, k) => { if (k !== 'info') say(t, k); };
+      try {
+        for (const s of list) {
+          if (!w.structs.has(s.id) || !pickable(s)) continue;
+          const pending = s.type === 'site' || !!s.upg;
+          if (pending && mode !== 'demolish') { if (K.cancelSite(G, s)) cancelled++; }
+          else if (!pending && mode !== 'cancel') demo.push({ x: s.x, y: s.y });
+        }
+        if (demo.length) {
+          if (!K.canBuildNow(G, 'demolish')) say('You cannot demolish right now.', 'warn');
+          else gone = K.tryBuild(G, 'demolish', demo);
+        }
+      } finally { G.msg = say; }
+      if (cancelled || gone) say([cancelled ? cancelled + ' build' + (cancelled > 1 ? 's' : '') + ' cancelled (fully refunded)' : '', gone ? gone + ' structure' + (gone > 1 ? 's' : '') + ' demolished (50% refund)' : ''].filter(Boolean).join(', ') + '.', 'info');
+      G.ui.multi = (G.ui.multi || []).filter((o) => w.structs.has(o.id));
+      if (G.ui.multi.length < 2) G.ui.multi = [];
+      if (G.ui.selected && !w.structs.has(G.ui.selected.id)) G.ui.selected = null;
+      refreshInfo();
+    }
+    UI.removeStructs = removeStructs;
     function boxSelect(G, b) {
       const c = K.Render.cam;
       const x0 = (c.x + Math.min(b.x0, b.x1) / c.zoom) / TS, x1 = (c.x + Math.max(b.x0, b.x1) / c.zoom) / TS;
       const y0 = (c.y + Math.min(b.y0, b.y1) / c.zoom) / TS, y1 = (c.y + Math.max(b.y0, b.y1) / c.zoom) / TS;
-      const list = G.units.filter((u) => u.team === 0 && !u.dead && !u.hidden && K.isSoldier(u) && u.x >= x0 - 0.3 && u.x <= x1 + 0.3 && u.y >= y0 && u.y - 1 <= y1);
-      selectUnits(list, b.shift);
-      if (list.length) G.ui.selected = null;
+      const list = b.structs ? [] : G.units.filter((u) => u.team === 0 && !u.dead && !u.hidden && K.isSoldier(u) && u.x >= x0 - 0.3 && u.x <= x1 + 0.3 && u.y >= y0 && u.y - 1 <= y1);
+      if (list.length) { G.ui.multi = []; selectUnits(list, b.shift); G.ui.selected = null; refreshInfo(); return; }
+      // no soldiers in the box (or Ctrl/Cmd held): select the structures in it instead
+      const got = b.shift ? structSel(G).slice() : [];
+      for (const o of G.world.structs.values())
+        if (pickable(o) && !got.includes(o) && o.x + o.w > x0 && o.x < x1 && o.y + o.h > y0 && o.y < y1) got.push(o);
+      if (!got.length && b.shift) { refreshInfo(); return; }
+      selectUnit(null);
+      G.ui.multi = got.length > 1 ? got : [];
+      G.ui.selected = got.length === 1 ? got[0] : null;
       refreshInfo();
     }
     const selbox = document.createElement('div');
@@ -690,8 +774,8 @@
       const k = e.key.toLowerCase();
       UI.keys[k] = true;
       if (UI.pendingKeep && (k === 'escape' || k === 'enter')) { e.preventDefault(); keepConfirm(k === 'enter'); }
-      else if ((k === 'delete' || k === 'backspace') && UI.G.ui.selected && UI.G.ui.selected.type === 'site') { e.preventDefault(); K.cancelSite(UI.G, UI.G.ui.selected); UI.G.ui.selected = null; refreshInfo(); }
-      else if (k === 'escape') { setTool(null); UI.shaping = false; UI.G.ui.selected = null; selectUnit(null); refreshInfo(); }
+      else if ((k === 'delete' || k === 'backspace') && UI.structSel(UI.G).length) { e.preventDefault(); UI.removeStructs(UI.G, UI.structSel(UI.G)); }
+      else if (k === 'escape') { setTool(null); UI.shaping = false; UI.G.ui.selected = null; UI.G.ui.multi = []; selectUnit(null); refreshInfo(); }
       else if (k === ' ') { e.preventDefault(); setSpeed(UI.speed === 0 ? UI.prevSpeed || 1 : 0); }
       else if (k === '1') setSpeed(1);
       else if (k === '2') setSpeed(2);
@@ -762,6 +846,7 @@
       const d = K.BEASTS[bst.kind], sx = bst.sex === 'm' ? '♂ male' : '♀ female', f = bst.sex === 'f' ? bst : bst.mate && !bst.mate.dead ? bst.mate : null;
       let br;
       if (bst.young) br = `Young — fully grown in ${Math.ceil(bst.growT)}s.`;
+      else if (bst.restUntil > G.time) br = `Resting after raising young — can breed again in ${Math.ceil(bst.restUntil - G.time)}s.`;
       else if (!K.beastCanBreed(G, bst)) br = 'Newly grown — cannot breed until after the next siege.';
       else if (f && f.mate) br = `<span class="warnc">Breeding — young due in ${Math.ceil(K.BEAST_BREED - f.breedT)}s.</span>`;
       else br = `Will breed with a ${bst.sex === 'm' ? 'female' : 'male'} that comes within ${d.aggro} tiles (one young every ${K.BEAST_BREED / 60} min, at most ${K.BEAST_LAIR_CAP} per lair).`;
