@@ -61,7 +61,9 @@
         const eN = y > 0 ? w.elev[i - N] : e, eS = y < N - 1 ? w.elev[i + N] : e;
         const tS = y < N - 1 ? w.terrain[i + N] : t, tN = y > 0 ? w.terrain[i - N] : t;
         const water = K.isWater(t);
-        const depth = water && t === T.LAKE ? waterDepth(w, x, y) : 1;
+        // a moat takes on the look of the lake or river that fills it
+        const wt = t === T.MOAT && w.moatSrc && w.moatSrc[i] ? w.moatSrc[i] : t;
+        const depth = water && wt === T.LAKE ? waterDepth(w, x, y) : 1;
         const patch = K.fbm(x / 9, y / 9, seed + 31, 2);
         for (let py = 0; py < TS; py++)
           for (let pxl = 0; pxl < TS; pxl++) {
@@ -71,7 +73,7 @@
             const hf = K.hash(gx, gy, seed + 3);
             let c, f = 1;
             if (water) {
-              c = t === T.RIVER ? COL.river : t === T.MOAT ? COL.moat : depth >= 3 ? COL.deep : depth === 2 ? COL.mid : COL.shallow;
+              c = wt === T.RIVER ? COL.river : wt === T.MOAT ? COL.moat : depth >= 3 ? COL.deep : depth === 2 ? COL.mid : COL.shallow;
               f = 0.97 + hsh * 0.06;
               // shoreline foam
               const edgeN = py === 0 && y > 0 && !K.isWater(tN), edgeS = py === TS - 1 && y < N - 1 && !K.isWater(tS);
@@ -127,7 +129,7 @@
           const spr = (v / 255) < pineP ? S.pine[v % 4] : S.oak[v % 6];
           P.g.drawImage(spr, tx * TS + ((v >> 3) % 3) - 1, ty * TS + ((v >> 5) % 3) - 1);
         } else if (t === T.ROCK) P.g.drawImage(S.rocks[v % 6], tx * TS, ty * TS);
-        else if (w.stump && w.stump[i] && t === T.GRASS) P.g.drawImage(S.stump, tx * TS, ty * TS);
+        else if (w.stump && w.stump[i] && t === T.GRASS) P.g.drawImage(w.stump[i] === 2 ? S.sapling : S.stump, tx * TS, ty * TS);
       }
   }
 
@@ -630,6 +632,12 @@
   }
 
   function drawMonster(ctx, m, time) {
+    // passing under a bridge (or a lowered drawbridge): only a dark shape shows between the planks
+    const ub = R.world.structAt(Math.floor(m.x), Math.floor(m.y));
+    if (ub && (ub.type === 'bridge' || (ub.type === 'drawbridge' && !ub.raised))) {
+      ctx.fillStyle = 'rgba(10,25,20,0.28)'; ctx.beginPath(); ctx.ellipse(m.x * TS, m.y * TS, 9, 4, m.ang || 0, 0, Math.PI * 2); ctx.fill();
+      return;
+    }
     if (m.kind === 'croc') return drawCroc(ctx, m, time);
     const px = m.x * TS, py = m.y * TS;
     const t = time + m.phase;
@@ -1035,7 +1043,7 @@
       R.miniVer = w.version;
       const d = R.miniImg.data;
       for (let i = 0; i < N * N; i++) {
-        let c = MCOL[w.terrain[i]];
+        let c = MCOL[w.terrain[i] === T.MOAT && w.moatSrc && w.moatSrc[i] ? w.moatSrc[i] : w.terrain[i]];
         let f = 1;
         if (!K.isWater(w.terrain[i]) && w.terrain[i] !== T.MOUNTAIN) f = 0.9 + w.elev[i] * 0.06;
         if (w.terrain[i] === T.MOUNTAIN) f = 0.8 + w.h[i] * 0.3;

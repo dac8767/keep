@@ -83,7 +83,8 @@ button:disabled { opacity: 0.45; cursor: default; }
 #info .hpbar { height: 6px; background: #000; border: 1px solid #555; margin: 4px 0; }
 #info .hpbar div { height: 100%; background: var(--green); }
 #minimap-wrap { padding: 3px; line-height: 0; }
-#minimap { width: 252px; height: 252px; cursor: pointer; }
+#minimap { width: 100%; height: auto; aspect-ratio: 1; cursor: pointer; }
+#side.wide { width: 336px; }
 
 #tooltip { position: fixed; pointer-events: none; background: #000d; border: 1px solid var(--edge2); padding: 4px 7px; border-radius: 2px; z-index: 20; max-width: 260px; font-size: 12px; }
 #phase .alert { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; color: #f2e6c8; animation: alertIn 0.6s ease-out; }

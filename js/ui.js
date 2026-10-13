@@ -132,6 +132,7 @@
     // horses: mounted riders / horses given, shown once there are Stables
     const hcap = K.horseCap(G);
     $('jobs').classList.toggle('nohorse', !hcap);
+    $('side').classList.toggle('wide', !!hcap); // horse columns need a wider sidebar
     let hfoot = '';
     if (hcap) {
       let given = 0;

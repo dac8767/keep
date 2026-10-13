@@ -824,6 +824,7 @@
     if (w.fillPlan.delete(i)) {
       if (!w.canPlace('fill', x, y, G).ok) { w.bump(); return; }
       w.setTerrain(i, T.DIRT);
+      K.scheduleRegrow(G, i, K.GRASS_REGROW);
       K.unstick(G);
       return;
     }
@@ -871,9 +872,20 @@
 
   // Move friendly units off tiles that just became solid.
   // Raise or lower a drawbridge. Anyone standing on it when it rises is thrown off.
+  // Enemies standing on a lowered drawbridge pin it down.
+  K.drawbridgeBlocked = function (G, s0) {
+    const grp = G.world.dbGroup(s0);
+    return G.units.some((u) => u.team === 1 && !u.dead && !u.hidden &&
+      grp.some((s) => u.x >= s.x && u.x < s.x + (s.w || 1) && u.y >= s.y && u.y < s.y + (s.h || 1)));
+  };
   K.setDrawbridge = function (G, s0, raised) {
-    if (!s0 || s0.type !== 'drawbridge') return;
+    if (!s0 || s0.type !== 'drawbridge') return false;
+    if (raised && !s0.raised && K.drawbridgeBlocked(G, s0)) {
+      G.msg('Enemies are on the drawbridge — it can\'t be raised until they are off it!', 'warn');
+      return false;
+    }
     for (const s of G.world.dbGroup(s0)) setDrawbridgeOne(G, s, raised);
+    return true;
   };
   K.rotateDrawbridge = function (G, s0) {
     const w = G.world, grp = w.dbGroup(s0), b = w.dbBox(grp);
@@ -935,7 +947,12 @@
   K.toggleAllDrawbridges = function (G) {
     const bs = [...G.world.structs.values()].filter((s) => s.type === 'drawbridge');
     const raise = bs.some((s) => !s.raised);
-    for (const s of bs) K.setDrawbridge(G, s, raise);
+    let stuck = 0;
+    for (const s of bs) {
+      if (raise && !s.raised && K.drawbridgeBlocked(G, s)) { stuck++; continue; }
+      K.setDrawbridge(G, s, raise);
+    }
+    if (stuck) G.msg(`${stuck} drawbridge section${stuck > 1 ? 's have' : ' has'} enemies on ${stuck > 1 ? 'them' : 'it'} and can't be raised.`, 'warn');
     return raise;
   };
 
@@ -1034,6 +1051,35 @@
   }
   K.blast = blast;
 
+  // Nature slowly heals: a stump sprouts a sapling, then a tree again; filled-in ground grasses over.
+  K.TREE_REGROW = 300; // seconds per stage (stump -> sapling -> tree)
+  K.GRASS_REGROW = 240;
+  K.scheduleRegrow = function (G, i, secs) {
+    const w = G.world;
+    if (!w.regrow) w.regrow = new Map();
+    w.regrow.set(i, G.time + secs * (0.75 + Math.random() * 0.5));
+  };
+  function regrow(G, dt) {
+    const w = G.world;
+    if (!w.regrow || !w.regrow.size) return;
+    G.regrowT = (G.regrowT || 0) - dt;
+    if (G.regrowT > 0) return;
+    G.regrowT = 1;
+    for (const [i, due] of w.regrow) {
+      if (G.time < due) continue;
+      const t = w.terrain[i], x = i & NM, y = i >> NS;
+      if (w.sgrid[i]) { w.regrow.delete(i); continue; }
+      if (w.plan.has(i) || w.fillPlan.has(i) || w.charges.has(i)) { w.regrow.set(i, G.time + 30); continue; }
+      if (t === T.GRASS && w.stump[i] === 1) {
+        w.stump[i] = 2; w.touch(x, y); w.bump(); K.scheduleRegrow(G, i, K.TREE_REGROW);
+      } else if (t === T.GRASS && w.stump[i] === 2) {
+        w.stump[i] = 0; w.setTerrain(i, T.FOREST); w.regrow.delete(i);
+      } else if (t === T.DIRT) {
+        w.setTerrain(i, T.GRASS); w.regrow.delete(i);
+      } else w.regrow.delete(i);
+    }
+  }
+
   K.update = function (G, dt) {
     if (G.phase === 'won' || G.phase === 'lost' || G.phase === 'place') return;
     const w = G.world;
@@ -1043,6 +1089,7 @@
     G.pathBudget = 12;
     G.farmGrowth = (G.farmGrowth + dt / 60) % 3;
     if (!w.stump) w.stump = new Uint8Array(N * N);
+    regrow(G, dt);
 
     // phases
     if (G.phase === 'build') {

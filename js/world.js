@@ -18,6 +18,8 @@
       this.plan = new Set();
       this.fillPlan = new Set();
       this.charges = new Map();
+      this.regrow = new Map();
+      this.moatSrc = new Uint8Array(N * N); // the water body (LAKE/RIVER) that flooded each moat tile
       this.ladderHp = new Map();
       this.ebridge = new Uint8Array(N * N); // enemy covered bridges over water
       this.ebridgeHp = new Map();
@@ -331,7 +333,26 @@
     }
     flood() {
       const f = this.floodSet();
-      for (const i of f) { this.terrain[i] = T.MOAT; this.touch(i & NM, i >> NS); }
+      if (!this.moatSrc) this.moatSrc = new Uint8Array(N * N);
+      for (const i of f) {
+        this.terrain[i] = T.MOAT; this.moatSrc[i] = 0;
+        // water depth shading reaches 3 tiles, which may cross a chunk edge
+        for (const [dx, dy] of [[0, 0], [-3, -3], [3, -3], [-3, 3], [3, 3]]) { const x = (i & NM) + dx, y = (i >> NS) + dy; if (K.inb(x, y)) this.touch(x, y); }
+      }
+      // carry the source water's kind into the new moat, so a cut dug into the sea looks like the sea
+      for (let changed = true; changed;) {
+        changed = false;
+        for (const i of f) {
+          if (this.moatSrc[i]) continue;
+          const x = i & NM, y = i >> NS;
+          for (const [dx, dy] of K.DIRS4) {
+            if (!K.inb(x + dx, y + dy)) continue;
+            const j = K.idx(x + dx, y + dy), t = this.terrain[j];
+            const s = t === T.LAKE || t === T.RIVER ? t : t === T.MOAT ? this.moatSrc[j] : 0;
+            if (s) { this.moatSrc[i] = s; changed = true; break; }
+          }
+        }
+      }
       if (f.size) this.bump();
       return f.size;
     }

@@ -401,6 +401,15 @@
     return P.c;
   }
 
+  function sapling() {
+    const P = mk(16, 16);
+    P.r(7, 8, 1, 4, '#6b4423');
+    P.r(5, 4, 5, 4, '#3f8a2c'); P.r(6, 3, 3, 1, '#3f8a2c'); P.r(6, 5, 2, 2, '#6cc04a'); P.p(8, 4, '#8ad86a');
+    P.r(4, 7, 2, 1, '#2f6a22'); P.r(9, 7, 2, 1, '#2f6a22');
+    outline(P, '#173a12');
+    return P.c;
+  }
+
   // ---------------- player structures ----------------
   function bricks(P, x0, y0, w, h, base, mortar, hi) {
     P.r(x0, y0, w, h, base);
@@ -950,7 +959,7 @@
     S.oak = [0, 1, 2, 3, 4, 5].map(oak);
     S.pine = [0, 1, 2, 3].map(pine);
     S.rocks = [0, 1, 2, 3, 4, 5].map(rocks);
-    S.stump = stump();
+    S.stump = stump(); S.sapling = sapling();
     S.keep = keep();
     S.keepdoor = keepDoor();
     S.house = [house(0), house(1)];

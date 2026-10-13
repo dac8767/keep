@@ -270,6 +270,7 @@
       u.carry = (u.carry || 0) + K.RATES.chopYield; u.carryRes = 'lumber';
       w.setTerrain(tr, T.GRASS);
       w.stump[tr] = 1;
+      K.scheduleRegrow(G, tr, K.TREE_REGROW);
       K.dropTree(G, u);
       u.path = null; u.state = null;
     }
@@ -353,7 +354,8 @@
       const nx = x + dx, ny = y + dy;
       if (!K.inb(nx, ny)) continue;
       const j = ny * N + nx;
-      if (!w.plan.has(j) && w.fPass(j) && ok(j)) out.push(j);
+      // marked tiles that are still dry can be stood on (so a marked strip is dug from its tip back to shore)
+      if ((!w.plan.has(j) || (!w.fillPlan.has(j) && !K.isWater(w.terrain[j]) && w.terrain[j] !== T.TRENCH)) && w.fPass(j) && ok(j)) out.push(j);
     }
     return out;
   };
@@ -401,29 +403,39 @@
     }
     const doneU = new Set(), doneT = new Set(), deferred = new Set();
     const memo = new Map();
+    // what floods (and where people can still walk) once t and every tile already being dug are trenches
     const wetOf = (t) => {
-      if (memo.has(t)) return memo.get(t);
+      const key = t + ':' + doneT.size;
+      if (memo.has(key)) return memo.get(key);
+      const digging = new Set([t, ...G.reserved, ...doneT]);
       let r = null, near = false;
       for (const [dx, dy] of K.DIRS4) {
         const x = (t & NM) + dx, y = (t >> NS) + dy;
-        if (K.inb(x, y) && (K.isWater(w.terrain[K.idx(x, y)]) || w.terrain[K.idx(x, y)] === T.TRENCH)) near = true;
+        if (!K.inb(x, y)) continue;
+        const j = K.idx(x, y);
+        if (K.isWater(w.terrain[j]) || w.terrain[j] === T.TRENCH || digging.has(j)) near = true;
       }
       if (near) {
         const wet = new Set();
-        for (const j of w.floodSet(new Set([t]))) if (w.terrain[j] !== T.MOAT) wet.add(j);
-        if (wet.size) r = { wet, home: keepRegion(w, wet) };
+        for (const j of w.floodSet(digging)) if (w.terrain[j] !== T.MOAT) wet.add(j);
+        if (wet.has(t)) r = { wet, home: keepRegion(w, wet) };
       }
-      memo.set(t, r);
+      memo.set(key, r);
       return r;
     };
+    // ditchers already at work, and where they stand: nobody digs out from under a ditcher
+    const working = G.units.filter((v) => v.team === 0 && !v.dead && v.job === 'dig' && v.digT != null && !crew.includes(v));
+    const standingOn = (t) => G.units.some((v) => v.team === 0 && !v.dead && !v.hidden && !crew.includes(v) && tileOf(v) === t) ||
+      working.some((v) => v.digStands && v.digStands.has(t) && v.digStands.size === 1);
     const tryPair = (u, t, strict) => {
       const c = comp[tileOf(u)];
-      let ok = (j) => comp[j] === c;
+      if (standingOn(t)) return null;
+      let ok = (j) => comp[j] === c && !G.reserved.has(j) && !doneT.has(j);
       if (!w.fillPlan.has(t) && home0 && home0[tileOf(u)]) {
         const f = wetOf(t);
         if (f) {
           const { wet, home } = f;
-          ok = (j) => comp[j] === c && !wet.has(j) && home[j];
+          ok = (j) => comp[j] === c && !wet.has(j) && home[j] && !G.reserved.has(j) && !doneT.has(j);
           if (strict) for (const n of needs) if (n.t !== t && !doneT.has(n.t) && !n.st.some((j) => !wet.has(j) && home[j])) return null;
         }
       }
@@ -439,6 +451,11 @@
         if (doneU.has(u) || doneT.has(t) || (strict && deferred.has(t))) continue;
         const st = tryPair(u, t, strict);
         if (!st) { deferred.add(t); continue; }
+        // anyone already assigned may no longer stand on t
+        let clash = false;
+        for (const v of [...working, ...doneU]) if (v.digStands && v.digStands.has(t) && v.digStands.size === 1) clash = true;
+        if (clash) { deferred.add(t); continue; }
+        for (const v of [...working, ...doneU]) if (v.digStands) v.digStands.delete(t);
         doneU.add(u); doneT.add(t);
         if (u.digT !== t) { u.path = null; u.digging = 0; }
         u.digT = t; u.digStands = new Set(st); G.reserved.add(t);
