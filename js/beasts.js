@@ -116,6 +116,32 @@
     }
     return true;
   }
+  // Can a beast walk straight from (x0,y0) to (x1,y1) without meeting a wall, water or rock?
+  function walkLine(w, x0, y0, x1, y1) {
+    const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0) * 4);
+    for (let k = 1; k <= n; k++) {
+      const x = x0 + (x1 - x0) * k / n, y = y0 + (y1 - y0) * k / n;
+      if (!bPassG(w, Math.floor(x), Math.floor(y))) return false;
+    }
+    return true;
+  }
+  // Can the beast still walk back to its lair? (search limited to its territory and a bit beyond)
+  function reachesLair(w, b, lim) {
+    const sx = Math.floor(b.x), sy = Math.floor(b.y), tx = Math.floor(b.hx), ty = Math.floor(b.hy);
+    if (sx === tx && sy === ty) return true;
+    const seen = new Set([sx + ',' + sy]), q = [[sx, sy]];
+    for (let h = 0; h < q.length; h++) {
+      const [x, y] = q[h];
+      for (const [dx, dy] of K.DIRS4) {
+        const nx = x + dx, ny = y + dy, key = nx + ',' + ny;
+        if (seen.has(key) || Math.hypot(nx - tx, ny - ty) > lim) continue;
+        seen.add(key);
+        if (nx === tx && ny === ty) return true;
+        if (bPassG(w, nx, ny)) q.push([nx, ny]);
+      }
+    }
+    return false;
+  }
   function step(G, b, tx, ty, sp, dt) {
     const w = G.world, dx = tx - b.x, dy = ty - b.y, d = Math.hypot(dx, dy);
     const bPass = flies(b) ? (w2, x, y) => K.inb(x, y) : bPassG;
@@ -236,19 +262,32 @@
         if (b.hp <= 0) slain(G, b);
         continue;
       }
+      // cut off from its lair (walled or dug away)? it makes its home where it is now
+      b.homeChk = (b.homeChk || 0) - dt;
+      if (!fly && b.homeChk <= 0) {
+        b.homeChk = 4 + G.rand() * 2;
+        if (!reachesLair(w, b, d.leash + 4)) { b.hx = b.x; b.hy = b.y; b.gx = null; }
+      }
       // wander around the lair
       if (b.wait > 0) { b.wait -= dt; b.moving = false; continue; }
       if (b.gx == null) {
-        // pick a walkable spot anywhere in its territory; drift home if it strayed outside
-        const out = Math.hypot(b.x - b.hx, b.y - b.hy) > d.roam;
-        for (let k = 0; k < 8; k++) {
-          const a = G.rand() * Math.PI * 2, r = (out ? 0.4 : 1) * Math.sqrt(G.rand()) * d.roam;
-          b.gx = b.hx + Math.cos(a) * r; b.gy = b.hy + Math.sin(a) * r;
-          if (fly || bPassG(w, Math.floor(b.gx), Math.floor(b.gy))) break;
+        // pick a spot in its territory it can walk straight to; drift home if it strayed outside
+        const home = Math.hypot(b.x - b.hx, b.y - b.hy), out = home > d.roam;
+        for (let k = 0; k < 16 && b.gx == null; k++) {
+          // half the tries look nearby, so a beast boxed in by walls still finds somewhere to go
+          const near = !fly && k >= 8, a = G.rand() * Math.PI * 2, r = near ? 1 + G.rand() * 4 : (out ? 0.4 : 1) * Math.sqrt(G.rand()) * d.roam;
+          const gx = (near ? b.x : b.hx) + Math.cos(a) * r, gy = (near ? b.y : b.hy) + Math.sin(a) * r;
+          if (near && Math.hypot(gx - b.hx, gy - b.hy) > Math.max(d.roam, home)) continue;
+          if (fly ? K.inb(Math.floor(gx), Math.floor(gy)) : walkLine(w, b.x, b.y, gx, gy)) { b.gx = gx; b.gy = gy; }
         }
+        if (b.gx == null) { b.wait = 0.5 + G.rand(); b.moving = false; continue; }
+        b.gT = 0;
       }
       const r = step(G, b, b.gx, b.gy, d.speed * 0.35, dt);
-      if (r !== false) { b.gx = null; b.wait = r === null ? 0.3 : 1 + G.rand() * 3; }
+      // sliding along an obstacle for too long: give up and pick another spot
+      b.gT = (b.gT || 0) + dt;
+      const lost = r === false && b.gT > Math.hypot(b.gx - b.x, b.gy - b.y) / (d.speed * 0.35) + 3;
+      if (r !== false || lost) { b.gx = null; b.wait = r === null || lost ? 0.3 : 1 + G.rand() * 3; }
     }
   };
 })();

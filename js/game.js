@@ -1071,7 +1071,7 @@
       if (w.sgrid[i]) { w.regrow.delete(i); continue; }
       if (w.plan.has(i) || w.fillPlan.has(i) || w.charges.has(i)) { w.regrow.set(i, G.time + 30); continue; }
       if (t === T.GRASS && w.stump[i] === 1) {
-        w.stump[i] = 2; w.touch(x, y); w.bump(); K.scheduleRegrow(G, i, K.TREE_REGROW);
+        w.stump[i] = 2; w.touch(x, y); K.scheduleRegrow(G, i, K.TREE_REGROW);
       } else if (t === T.GRASS && w.stump[i] === 2) {
         w.stump[i] = 0; w.setTerrain(i, T.FOREST); w.regrow.delete(i);
       } else if (t === T.DIRT) {
@@ -1272,6 +1272,7 @@
     G.spawnQueue = [];
     G.squads = [];
     for (const s of w.structs.values()) if (s.type === 'drawbridge') { s.raised = false; w.touch(s.x, s.y); }
+    w.bump();
     for (const s of w.structs.values()) if (s.type === 'wall') { const i = K.idx(s.x, s.y); w.ladder[i] = 0; w.tower[i] = 0; }
     w.ladderHp.clear();
     if (w.ebridgeHp.size) G.msg('The retreating enemy burns its covered bridges behind it.', 'info');

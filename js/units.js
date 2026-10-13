@@ -185,6 +185,7 @@
   // ---------- friendly AI ----------
   function hide(G, u, dt) {
     const w = G.world, k = w.keep;
+    u.lastAt = null;
     if (u.onWall && (u.job !== 'archer' || G.allKeep)) { K.stepOffWall(G, u); u.wb = null; u.wpath = null; }
     if (!k) return wander(G, u, dt, G.kingSpot.x, G.kingSpot.y, 3);
     const r = goTo(G, u, dt, adjTo(w, (j) => w.sgrid[j] === k.id), k.x + 1, k.y + 1, 'keep');
@@ -295,23 +296,41 @@
 
   // ---- dig dispatcher ----
   // Flood-label walkable ground (8-way, no corner cutting) so we know who can reach what.
+  // Walkable tiles as a flat grid (bit 1: walkable now, bit 2: walkable or a drawbridge), rebuilt per map change.
+  function passGrid(w) {
+    if (w.passV === w.version && w.passG) return w.passG;
+    const g = w.passG || (w.passG = new Uint8Array(N * N));
+    for (let i = 0; i < N * N; i++) {
+      const sid = w.sgrid[i];
+      g[i] = w.fPass(i) ? 3 : sid && w.structs.get(sid).type === 'drawbridge' ? 2 : 0;
+    }
+    w.passV = w.version;
+    return g;
+  }
+  const DX8 = [1, -1, 0, 0, 1, 1, -1, -1], DY8 = [0, 0, 1, -1, 1, -1, 1, -1];
+  // Flood out from the queued seeds over tiles where ok[] is set (no corner-cutting past blocked tiles).
+  function spread(ok, mark, q, qt, id) {
+    let qh = 0;
+    while (qh < qt) {
+      const i = q[qh++], x = i & NM, y = i >> NS;
+      for (let d = 0; d < 8; d++) {
+        const dx = DX8[d], dy = DY8[d], nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+        const j = ny * N + nx;
+        if (mark[j] || !ok[j]) continue;
+        if (dx && dy && (!ok[y * N + nx] || !ok[ny * N + x])) continue;
+        mark[j] = id; q[qt++] = j;
+      }
+    }
+  }
   function walkComps(w) {
-    const comp = new Int32Array(N * N), q = new Int32Array(N * N);
+    const g = passGrid(w), ok = new Uint8Array(N * N), comp = new Int32Array(N * N), q = new Int32Array(N * N);
+    for (let i = 0; i < N * N; i++) ok[i] = g[i] & 1;
     let id = 0;
     for (let s = 0; s < N * N; s++) {
-      if (comp[s] || !w.fPass(s)) continue;
-      id++; comp[s] = id; let qh = 0, qt = 0; q[qt++] = s;
-      while (qh < qt) {
-        const i = q[qh++], x = i & NM, y = i >> NS;
-        for (const [dx, dy] of K.DIRS8) {
-          const nx = x + dx, ny = y + dy;
-          if (!K.inb(nx, ny)) continue;
-          const j = ny * N + nx;
-          if (comp[j] || !w.fPass(j)) continue;
-          if (dx && dy && (!w.fPass(y * N + nx) || !w.fPass(ny * N + x))) continue;
-          comp[j] = id; q[qt++] = j;
-        }
-      }
+      if (comp[s] || !ok[s]) continue;
+      id++; comp[s] = id; q[0] = s;
+      spread(ok, comp, q, 1, id);
     }
     return comp;
   }
@@ -319,26 +338,19 @@
   function keepRegion(w, wet, lowered) {
     const k = w.keep;
     if (!k) return null;
-    const pass = (i) => !wet.has(i) && (w.fPass(i) || (lowered && w.sgrid[i] && w.structs.get(w.sgrid[i]).type === 'drawbridge'));
-    const seen = new Uint8Array(N * N), q = [];
+    const g = passGrid(w), ok = new Uint8Array(N * N);
+    for (let i = 0; i < N * N; i++) ok[i] = lowered ? g[i] >> 1 : g[i] & 1;
+    for (const i of wet) ok[i] = 0;
+    const seen = new Uint8Array(N * N), q = new Int32Array(N * N);
+    let qt = 0;
     for (let y = k.y - 1; y <= k.y + 3; y++)
       for (let x = k.x - 1; x <= k.x + 3; x++) {
         if (!K.inb(x, y)) continue;
         const i = K.idx(x, y);
-        if (w.sgrid[i] === k.id || !pass(i)) continue;
-        seen[i] = 1; q.push(i);
+        if (w.sgrid[i] === k.id || !ok[i]) continue;
+        seen[i] = 1; q[qt++] = i;
       }
-    while (q.length) {
-      const i = q.pop(), x = i & NM, y = i >> NS;
-      for (const [dx, dy] of K.DIRS8) {
-        const nx = x + dx, ny = y + dy;
-        if (!K.inb(nx, ny)) continue;
-        const j = ny * N + nx;
-        if (seen[j] || !pass(j)) continue;
-        if (dx && dy && (!pass(y * N + nx) || !pass(ny * N + x))) continue;
-        seen[j] = 1; q.push(j);
-      }
-    }
+    spread(ok, seen, q, qt, 1);
     return seen;
   }
   K.keepRegion = keepRegion;
@@ -368,7 +380,10 @@
     if (!crew.length) return;
     for (const u of crew) if (u.digT != null) { G.reserved.delete(u.digT); }
     if (!w.plan.size) { for (const u of crew) { u.digT = null; u.digStands = null; } return; }
-    const comp = walkComps(w);
+    // whole-map walk data only changes with the map, so keep it between rounds
+    let C = G.digCache;
+    if (!C || C.v !== w.version || C.w !== w) C = G.digCache = { v: w.version, w, comp: walkComps(w), home0: keepRegion(w, new Set()), wet: new Map() };
+    const comp = C.comp;
     const tiles = [];
     for (const i of w.plan) if (!G.reserved.has(i)) tiles.push(i);
     // where a digger could stand for each tile (dry, not itself marked), by walk component
@@ -394,7 +409,7 @@
       }
     }
     pairs.sort((a, b) => a[0] - b[0]);
-    const home0 = keepRegion(w, new Set());
+    const home0 = C.home0;
     // every marked tile and construction job that can be reached now must stay reachable
     const needs = [];
     if (home0) {
@@ -402,12 +417,12 @@
       for (const o of w.structs.values()) if (o.type === 'site' || o.upg) { const st = K.buildSpots(w, o); if (st.some((j) => home0[j])) needs.push({ t: -1, st }); }
     }
     const doneU = new Set(), doneT = new Set(), deferred = new Set();
-    const memo = new Map();
+    const memo = C.wet;
     // what floods (and where people can still walk) once t and every tile already being dug are trenches
     const wetOf = (t) => {
-      const key = t + ':' + doneT.size;
-      if (memo.has(key)) return memo.get(key);
       const digging = new Set([t, ...G.reserved, ...doneT]);
+      const key = t + ':' + [...digging].sort((a, b) => a - b).join(',');
+      if (memo.has(key)) return memo.get(key);
       let r = null, near = false;
       for (const [dx, dy] of K.DIRS4) {
         const x = (t & NM) + dx, y = (t >> NS) + dy;
@@ -417,7 +432,7 @@
       }
       if (near) {
         const wet = new Set();
-        for (const j of w.floodSet(digging)) if (w.terrain[j] !== T.MOAT) wet.add(j);
+        for (const d of digging) if (!wet.has(d)) for (const j of w.floodFrom(d, digging)) if (w.terrain[j] !== T.MOAT) wet.add(j);
         if (wet.has(t)) r = { wet, home: keepRegion(w, wet) };
       }
       memo.set(key, r);
@@ -772,7 +787,12 @@
         // a job that cuts something off waits until nothing else is left to build
         if (!u.rep && !free) for (const s of held) if (pick(s)) break;
       }
-      if (!u.rep) { if (G.phase === 'defense') return hide(G, u, dt); u.state = 'nowork'; return wander(G, u, dt, w.keep ? w.keep.x + 1 : u.x, w.keep ? w.keep.y + 4 : u.y, 3); }
+      if (!u.rep) { if (G.phase === 'defense') return hide(G, u, dt);
+        u.state = 'nowork';
+        // with nothing left to build, stay by the last job rather than heading home
+        if (u.lastAt) return wander(G, u, dt, u.lastAt.x, u.lastAt.y, 2.5);
+        return wander(G, u, dt, w.keep ? w.keep.x + 1 : u.x, w.keep ? w.keep.y + 4 : u.y, 3);
+      }
     }
     const s = u.rep, sp = u.spot;
     if (u.wb && !u.onWall) {
@@ -795,6 +815,7 @@
     }
     u.face = s.x + s.w / 2 > u.x ? 1 : -1;
     u.state = 'work'; u.moving = false;
+    if (!u.onWall) u.lastAt = { x: u.x, y: u.y };
     u.anim = (u.anim || 0) + dt;
     u.atkAnim = (u.anim % 0.8) < 0.2 ? 0.1 : 0;
     if (s.type === 'site') {

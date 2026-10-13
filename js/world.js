@@ -331,6 +331,23 @@
       }
       return out;
     }
+    // The trench run through tile t (counting `extra` as dug) if it would hold water, else empty.
+    floodFrom(t, extra) {
+      const isTrench = (i) => this.terrain[i] === T.TRENCH || extra.has(i);
+      const seen = new Set([t]), q = [t];
+      let wet = false;
+      for (let h = 0; h < q.length; h++) {
+        const x = q[h] & NM, y = q[h] >> NS;
+        for (const [dx, dy] of K.DIRS4) {
+          const nx = x + dx, ny = y + dy;
+          if (!K.inb(nx, ny)) continue;
+          const j = K.idx(nx, ny);
+          if (K.isWater(this.terrain[j])) wet = true;
+          else if (!seen.has(j) && isTrench(j)) { seen.add(j); q.push(j); }
+        }
+      }
+      return wet ? seen : new Set();
+    }
     flood() {
       const f = this.floodSet();
       if (!this.moatSrc) this.moatSrc = new Uint8Array(N * N);
