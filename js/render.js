@@ -213,6 +213,7 @@
       if (s.type === 'wall' && s.engine) items.push({ y: s.y + K.SDEF[s.engine.type].h + 0.002, eng: s });
     }
     for (const s of ground) drawStruct(ctx, s, G, time);
+    drawLairs(ctx, G, x0, y0, x1, y1);
 
     for (const u of G.units) {
       if (u.hidden || u.dead) continue;
@@ -747,36 +748,15 @@
     }
   }
 
-  function drawOverlays(ctx, G, time, x0, y0, x1, y1) {
-    const w = R.world;
-    // unclaimed mine sites: glowing outline + bobbing pickaxe so they stand out
-    for (const [mx, my] of w.mines || []) {
-      if (mx + 2 < x0 || mx > x1 || my + 2 < y0 || my > y1) continue;
-      if (w.sgrid[K.idx(mx, my)]) continue;
-      const pulse = 0.5 + Math.sin(time * 3 + mx) * 0.5;
-      ctx.strokeStyle = `rgba(255,205,70,${0.45 + pulse * 0.45})`;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3, 2]);
-      ctx.strokeRect(mx * TS + 0.5, my * TS + 0.5, 2 * TS - 1, 2 * TS - 1);
-      ctx.setLineDash([]);
-      const bx = mx * TS + TS - 5, by = my * TS - 6 + Math.round(Math.sin(time * 2.5 + my) * 2);
-      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(bx - 2, by - 2, 14, 14);
-      ctx.fillStyle = '#ffd25a'; ctx.fillRect(bx - 1, by - 1, 12, 12);
-      ctx.fillStyle = '#3a2a18'; ctx.fillRect(bx, by, 10, 10);
-      ctx.fillStyle = '#b08850'; for (let k = 0; k < 6; k++) ctx.fillRect(bx + 2 + k, by + 7 - k, 1, 1);
-      ctx.fillStyle = '#d0d6e0'; ctx.fillRect(bx + 4, by + 1, 5, 1); ctx.fillRect(bx + 8, by + 2, 1, 3); ctx.fillRect(bx + 3, by + 2, 1, 1);
-    }
-    // spider webs and troll bones mark beasts' lairs
+  // Webs, bones, dens and nests mark beasts' lairs; drawn on the ground, beneath every creature.
+  function drawLairs(ctx, G, x0, y0, x1, y1) {
+    const done = new Set();
     for (const b of G.beasts || []) {
       if (b.dead || b.hx < x0 - 12 || b.hx > x1 + 12 || b.hy < y0 - 12 || b.hy > y1 + 12) continue;
+      const key = b.kind + ':' + Math.round(b.hx * 2) + ',' + Math.round(b.hy * 2);
+      if (done.has(key)) continue;
+      done.add(key);
       const cx = b.hx * TS, cy = b.hy * TS;
-      // territory ring: faint always, bold while hovered
-      const hov = G.ui && G.ui.hoverBeast === b;
-      ctx.save(); ctx.setLineDash([4, 4]); ctx.lineWidth = hov ? 1.5 : 1;
-      ctx.strokeStyle = hov ? 'rgba(255,80,60,0.85)' : 'rgba(220,60,50,0.28)';
-      ctx.beginPath(); ctx.arc(cx, cy, K.BEASTS[b.kind].roam * TS, 0, Math.PI * 2); ctx.stroke();
-      if (hov) { ctx.fillStyle = 'rgba(255,60,40,0.07)'; ctx.fill(); }
-      ctx.restore();
       if (b.kind === 'spider') {
         ctx.strokeStyle = 'rgba(235,235,245,0.32)'; ctx.lineWidth = 0.6;
         for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4 + 0.2; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * 26, cy + Math.sin(a) * 18); ctx.stroke(); }
@@ -797,6 +777,38 @@
         for (const [dx, dy] of [[-10, 6], [9, -4], [4, 10], [-6, -9]]) { ctx.fillRect(cx + dx, cy + dy, 4, 1); ctx.fillRect(cx + dx - 1, cy + dy - 1, 1, 3); ctx.fillRect(cx + dx + 4, cy + dy - 1, 1, 3); }
         ctx.fillRect(cx + 12, cy + 4, 3, 3); ctx.fillStyle = '#2a2420'; ctx.fillRect(cx + 12, cy + 5, 1, 1); ctx.fillRect(cx + 14, cy + 5, 1, 1);
       }
+    }
+  }
+  function drawOverlays(ctx, G, time, x0, y0, x1, y1) {
+    const w = R.world;
+    // unclaimed mine sites: glowing outline + bobbing pickaxe so they stand out
+    for (const [mx, my] of w.mines || []) {
+      if (mx + 2 < x0 || mx > x1 || my + 2 < y0 || my > y1) continue;
+      if (w.sgrid[K.idx(mx, my)]) continue;
+      const pulse = 0.5 + Math.sin(time * 3 + mx) * 0.5;
+      ctx.strokeStyle = `rgba(255,205,70,${0.45 + pulse * 0.45})`;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 2]);
+      ctx.strokeRect(mx * TS + 0.5, my * TS + 0.5, 2 * TS - 1, 2 * TS - 1);
+      ctx.setLineDash([]);
+      const bx = mx * TS + TS - 5, by = my * TS - 6 + Math.round(Math.sin(time * 2.5 + my) * 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(bx - 2, by - 2, 14, 14);
+      ctx.fillStyle = '#ffd25a'; ctx.fillRect(bx - 1, by - 1, 12, 12);
+      ctx.fillStyle = '#3a2a18'; ctx.fillRect(bx, by, 10, 10);
+      ctx.fillStyle = '#b08850'; for (let k = 0; k < 6; k++) ctx.fillRect(bx + 2 + k, by + 7 - k, 1, 1);
+      ctx.fillStyle = '#d0d6e0'; ctx.fillRect(bx + 4, by + 1, 5, 1); ctx.fillRect(bx + 8, by + 2, 1, 3); ctx.fillRect(bx + 3, by + 2, 1, 1);
+    }
+    // beasts' territory rings
+    for (const b of G.beasts || []) {
+      if (b.dead || b.hx < x0 - 12 || b.hx > x1 + 12 || b.hy < y0 - 12 || b.hy > y1 + 12) continue;
+      const cx = b.hx * TS, cy = b.hy * TS;
+      // territory ring: faint always, bold while hovered
+      const hov = G.ui && G.ui.hoverBeast === b;
+      ctx.save(); ctx.setLineDash([4, 4]); ctx.lineWidth = hov ? 1.5 : 1;
+      ctx.strokeStyle = hov ? 'rgba(255,80,60,0.85)' : 'rgba(220,60,50,0.28)';
+      ctx.beginPath(); ctx.arc(cx, cy, K.BEASTS[b.kind].roam * TS, 0, Math.PI * 2); ctx.stroke();
+      if (hov) { ctx.fillStyle = 'rgba(255,60,40,0.07)'; ctx.fill(); }
+      ctx.restore();
     }
     // planned trenches
     if (w.plan && w.plan.size) {
