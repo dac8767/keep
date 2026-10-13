@@ -99,7 +99,12 @@
     }
 
     const st = { terrain, elev, h, seed, R, O, flow: new Uint8Array(N * N) };
-    carveRivers(st);
+    // every map has rivers, whatever the sliders: if few could form naturally (no lakes, or
+    // mountains everywhere) relax where they may rise, then let them cut gorges through the mountains
+    let rivers = carveRivers(st);
+    const want = Math.max(1, scaleN(1.5, 1));
+    for (const [minLen, mtn] of [[40, false], [30, true], [16, true]])
+      if (rivers < want) rivers += carveRivers(st, { count: want - rivers, minLen, anySource: true, mtn, avoid: () => false });
     cleanLakes(st);
     smoothElev(st);
 
@@ -167,14 +172,15 @@
     for (let i = 0; i < N * N; i++) if (st.terrain[i] === T.RIVER) n++;
     if (n >= 30 * (N * N) / 16384) return;
     const avoid = (i) => K.dist(i & NM, i >> NS, start.x, start.y) < 10;
-    for (const [minLen, anySource] of [[40, false], [30, true], [16, true]])
-      if (carveRivers(st, { count: 1, minLen, anySource, avoid })) return;
+    for (const [minLen, anySource, mtn] of [[40, false, false], [30, true, false], [30, true, true], [16, true, true], [8, true, true]])
+      if (carveRivers(st, { count: 1, minLen, anySource, mtn, avoid })) return;
   }
 
   // Rivers follow real drainage: a priority-flood from every outlet (lakes and the map edge)
   // gives each tile a downstream neighbour, so water only ever runs downhill (or across the
   // lowest saddle out of a basin) and never climbs over ridges or mountains.
-  // `o` (realm fallback): { count, minLen, anySource, avoid(i) } relaxes where a river may rise.
+  // `o` (fallback): { count, minLen, anySource, mtn, avoid(i) } relaxes where a river may rise;
+  // `mtn` lets it run on through mountains, cutting a gorge.
   function carveRivers(st, o) {
     const flow = st.flow;
     const { terrain, elev, h, R, seed } = st;
@@ -219,14 +225,14 @@
       // source: high grassland at the foot of a mountain
       const sx = 20 + Math.floor(R() * (N - 40)), sy = 20 + Math.floor(R() * (N - 40));
       const si = K.idx(sx, sy);
-      if (terrain[si] !== T.GRASS || elev[si] < (o && o.anySource ? 1 : 2)) continue;
+      if (terrain[si] !== T.GRASS || elev[si] < (o && o.mtn ? 0 : o && o.anySource ? 1 : 2)) continue;
       let nearM = false;
       for (const [dx, dy] of K.DIRS8) if (K.inb(sx + dx, sy + dy) && terrain[K.idx(sx + dx, sy + dy)] === T.MOUNTAIN) nearM = true;
       if (!nearM && !(o && o.anySource)) continue;
       const path = [];
       let i = si, ok = false;
       while (i >= 0 && path.length < 4 * N) {
-        if (terrain[i] === T.MOUNTAIN || terrain[i] === T.MINE || (o && o.avoid(i))) break;
+        if ((terrain[i] === T.MOUNTAIN && !(o && o.mtn)) || terrain[i] === T.MINE || (o && o.avoid(i))) break;
         path.push(i);
         if (terrain[i] === T.LAKE || terrain[i] === T.RIVER) { ok = true; break; }
         const x = i & NM, y = i >> NS;
@@ -249,7 +255,8 @@
           const nx = px + dx, ny = py + dy;
           if (!K.inb(nx, ny)) continue;
           const j = K.idx(nx, ny);
-          if (terrain[j] === T.LAKE || terrain[j] === T.MOUNTAIN) continue;
+          if (terrain[j] === T.LAKE || (terrain[j] === T.MOUNTAIN && !(o && o.mtn))) continue;
+          if (terrain[j] === T.MOUNTAIN) elev[j] = Math.min(elev[j], 3);
           if (terrain[j] !== T.RIVER || !flow[j]) flow[j] = dir;
           if (o && (terrain[j] === T.MINE || o.avoid(j))) continue;
           terrain[j] = T.RIVER;

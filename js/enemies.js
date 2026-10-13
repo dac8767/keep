@@ -437,6 +437,17 @@
     return path.reverse().slice(0, 40);
   }
 
+  // nearest living land beast (not a flying wyvern) a siege engine can lob a stone at
+  function beastInReach(G, x, y, base, h, minR) {
+    let best = null, bd = 1e9;
+    for (const b of G.beasts || []) {
+      if (b.dead || K.BEASTS[b.kind].fly) continue;
+      const dd = Math.hypot(b.x - x, b.y - y);
+      if (dd <= minR || dd >= bd || dd > K.rangeVs(base, h, K.groundH(G.world, b.x, b.y))) continue;
+      best = b; bd = dd;
+    }
+    return best;
+  }
   // ---------------- player artillery ----------------
   K.updateStructs = function (G, dt) {
     const w = G.world;
@@ -460,9 +471,10 @@
       }
       if (!d.range) continue;
       e.reload = (e.reload || 0) - dt;
-      if (G.phase !== 'defense' || e.reload > 0) continue;
-      const cx = s.x + d.w / 2, cy = s.y + d.h / 2;
-      const t = K.nearestRanged(G, cx, cy, d.range, K.groundH(w, cx, cy) + lift, 1, (v, dd) => dd > (d.minRange || 2.5) && !v.retreat);
+      if ((G.phase !== 'defense' && G.phase !== 'build') || e.reload > 0) continue;
+      const cx = s.x + d.w / 2, cy = s.y + d.h / 2, sh = K.groundH(w, cx, cy) + lift, minR = d.minRange || 2.5;
+      // the besiegers come first; otherwise (or between sieges) any land beast in reach
+      const t = (G.phase === 'defense' && K.nearestRanged(G, cx, cy, d.range, sh, 1, (v, dd) => dd > minR && !v.retreat)) || beastInReach(G, cx, cy, d.range, sh, minR);
       if (!t) continue;
       if (G.res.stone < d.ammo) { if (!G.ammoWarn || G.time - G.ammoWarn > 20) { G.ammoWarn = G.time; G.msg('Your siege engines are out of stone!', 'warn'); } continue; }
       G.res.stone -= d.ammo;
@@ -484,6 +496,12 @@
       if (p.kind === 'stone') {
         const foe = p.team === 0 ? 1 : 0;
         K.around(G, p.tx, p.ty, p.splash, (v) => { if (v.team === foe) K.damage(G, v, p.dmg * (v.onWall ? 0.7 : 1)); });
+        // a stone landing among land beasts hurts them too (a wyvern overhead is out of reach)
+        for (const b of G.beasts || []) {
+          if (b.dead || K.BEASTS[b.kind].fly) continue;
+          const bd = Math.hypot(b.x - p.tx, b.y - p.ty);
+          if (bd <= Math.max(0.8, p.splash || 0)) { b.hp -= p.dmg * (bd < 0.6 ? 1 : 0.6); b.hurtT = 4; }
+        }
         if (p.team === 0 && w.ebridgeHp.size) {
           const r = Math.max(1, p.splash || 1);
           for (const i of [...w.ebridgeHp.keys()]) if (Math.hypot((i & NM) + 0.5 - p.tx, (i >> NS) + 0.5 - p.ty) <= r) K.damageEBridge(G, i, p.dmg * (i === ti ? 1 : 0.5));

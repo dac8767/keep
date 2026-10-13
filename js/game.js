@@ -1053,7 +1053,7 @@
   K.blast = blast;
 
   // Nature slowly heals: a stump sprouts a sapling, then a tree again; filled-in ground grasses over.
-  K.TREE_REGROW = 300; // seconds per stage (stump -> sapling -> tree)
+  K.TREE_REGROW = 600; // seconds per stage (stump -> sapling -> tree)
   K.GRASS_REGROW = 240;
   K.scheduleRegrow = function (G, i, secs) {
     const w = G.world;
