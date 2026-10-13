@@ -759,7 +759,7 @@
       return tip(e, `<b>${croc ? 'Crocodile' : 'Tentacle Monster'}</b><br>${croc ? 'Lurks in the rivers (and moats joined to them) and seizes anyone — friend or foe — in the water.' : 'Roams its lake and any moat joined to it, seizing anyone — friend or foe — in the water or on the shore beside it. Your people keep a step back from the shore when it is near.'} Units on bridges are safe.`, mon);
     }
     if (bst) {
-      const d = K.BEASTS[bst.kind], sx = bst.sex === 'm' ? '♂ male' : '♀ female', f = bst.sex === 'f' ? bst : null;
+      const d = K.BEASTS[bst.kind], sx = bst.sex === 'm' ? '♂ male' : '♀ female', f = bst.sex === 'f' ? bst : bst.mate && !bst.mate.dead ? bst.mate : null;
       let br;
       if (bst.young) br = `Young — fully grown in ${Math.ceil(bst.growT)}s.`;
       else if (!K.beastCanBreed(G, bst)) br = 'Newly grown — cannot breed until after the next siege.';

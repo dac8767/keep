@@ -167,6 +167,7 @@
       b.young = false; b.hp += d.hp - b.maxHp; b.maxHp = d.hp; b.noBreedUntil = G.round + 1;
     }
     const born = [];
+    for (const b of G.beasts) if (b.sex === 'm') b.mate = null;
     for (const f of G.beasts) {
       if (f.sex !== 'f' || !K.beastCanBreed(G, f)) continue;
       const reach = K.BEASTS[f.kind].aggro;
@@ -174,6 +175,7 @@
         Math.hypot(m.x - f.x, m.y - f.y) <= reach && (flies(f) || clear(w, f.x, f.y, m.x, m.y)));
       f.mate = mate || null;
       if (!mate) continue;
+      mate.mate = f;
       f.breedT = (f.breedT || 0) + dt;
       if (f.breedT < K.BEAST_BREED) continue;
       f.breedT = 0;
@@ -267,6 +269,14 @@
       if (!fly && b.homeChk <= 0) {
         b.homeChk = 4 + G.rand() * 2;
         if (!reachesLair(w, b, d.leash + 4)) { b.hx = b.x; b.hy = b.y; b.gx = null; }
+      }
+      // courting: stay close to the mate rather than wandering off
+      if (b.mate && !b.mate.dead) {
+        const m = b.mate, dm = Math.hypot(m.x - b.x, m.y - b.y);
+        b.gx = null;
+        if (dm > 1.3) step(G, b, m.x, m.y, d.speed * 0.35, dt);
+        else { b.moving = false; b.face = m.x > b.x ? 1 : -1; }
+        continue;
       }
       // wander around the lair
       if (b.wait > 0) { b.wait -= dt; b.moving = false; continue; }

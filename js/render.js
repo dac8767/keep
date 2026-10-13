@@ -323,7 +323,10 @@
     const bx = s.x * TS + (d.w * TS - img.width) / 2, by = (s.y + d.h) * TS - img.height - 6;
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
     ctx.fillRect(s.x * TS + 2, (s.y + d.h) * TS - 9, d.w * TS - 4, 3);
-    ctx.drawImage(img, Math.round(bx), Math.round(by));
+    if (e.type === 'trebuchet' && e.face < 0) {
+      ctx.save(); ctx.translate(Math.round(bx) * 2 + img.width, 0); ctx.scale(-1, 1);
+      ctx.drawImage(img, Math.round(bx), Math.round(by)); ctx.restore();
+    } else ctx.drawImage(img, Math.round(bx), Math.round(by));
   }
   function drawStruct(ctx, s, G, time) {
     const S = K.SPR, w = R.world;
@@ -386,7 +389,11 @@
     }
     if (!img) return;
     const dx = bx + (bw - img.width) / 2, dy = by + bh - img.height;
-    ctx.drawImage(img, Math.round(dx), Math.round(dy));
+    if (s.type === 'trebuchet' && s.face < 0) {
+      // turned to face whatever it last fired at
+      ctx.save(); ctx.translate(Math.round(dx) * 2 + img.width, 0); ctx.scale(-1, 1);
+      ctx.drawImage(img, Math.round(dx), Math.round(dy)); ctx.restore();
+    } else ctx.drawImage(img, Math.round(dx), Math.round(dy));
     if (s.type === 'keep') {
       // waving banner
       const fx = bx + 42, fy = by + bh - 60 + 1;
@@ -570,13 +577,16 @@
     if (b.hp < b.maxHp) bar(ctx, px - 7, top - 2, 14, b.hp / b.maxHp, '#c060e0');
     // sex marker: blue ♂ / pink ♀, with a heart while courting
     if (b.sex) {
-      ctx.save(); ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      const sx = px + (b.kind === 'troll' ? 9 : 8) * sc, sy = top + 4;
-      ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.strokeText(b.sex === 'm' ? '♂' : '♀', sx, sy);
-      ctx.fillStyle = b.sex === 'm' ? '#6fb4ff' : '#ff86c8'; ctx.fillText(b.sex === 'm' ? '♂' : '♀', sx, sy);
+      ctx.save(); ctx.font = '5px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      const sx = px + (b.kind === 'troll' ? 7 : 6) * sc, sy = top + 3;
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = b.sex === 'm' ? '#a9c8e8' : '#e8b4cf'; ctx.fillText(b.sex === 'm' ? '♂' : '♀', sx, sy);
+      ctx.globalAlpha = 1;
       if (b.mate && !b.mate.dead) {
-        const hy = sy - 8 - Math.abs(Math.sin(time * 3 + b.phase)) * 2;
-        ctx.strokeText('♥', sx, hy); ctx.fillStyle = '#ff5a7a'; ctx.fillText('♥', sx, hy);
+        ctx.font = 'bold 8px sans-serif';
+        const hy = top - 2 - Math.abs(Math.sin(time * 3 + b.phase)) * 2;
+        ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.strokeText('♥', px, hy);
+        ctx.fillStyle = '#ff5a7a'; ctx.fillText('♥', px, hy);
       }
       ctx.restore();
     }

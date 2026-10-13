@@ -335,7 +335,10 @@
     P.r(12, 18, 4, 3, TEAM[team].a);
     wheel(P, 5, 27, 0); wheel(P, 22, 27, 0);
     outline(P);
-    return P.c;
+    // mirrored so that, facing right, the counterweight leads and the long arm trails behind
+    const M = mk(28, 30);
+    M.g.translate(28, 0); M.g.scale(-1, 1); M.g.drawImage(P.c, 0, 0);
+    return M.c;
   }
   function boat() {
     const P = mk(18, 9);

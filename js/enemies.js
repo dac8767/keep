@@ -466,7 +466,7 @@
       if (!t) continue;
       if (G.res.stone < d.ammo) { if (!G.ammoWarn || G.time - G.ammoWarn > 20) { G.ammoWarn = G.time; G.msg('Your siege engines are out of stone!', 'warn'); } continue; }
       G.res.stone -= d.ammo;
-      e.reload = d.reload; e.fired = 0.6;
+      e.reload = d.reload; e.fired = 0.6; e.face = t.x > cx ? 1 : -1;
       // lead the target a little
       K.shoot(G, 'stone', cx, cy - 1 - lift * 0.3, t.x + (Math.random() - 0.5) * 0.8, t.y + (Math.random() - 0.5) * 0.8, { team: 0, dmg: d.dmg, splash: d.splash });
     }
